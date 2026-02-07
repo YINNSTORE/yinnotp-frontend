@@ -123,8 +123,7 @@ const [username, setUsername] = useState("")
 
     setLoading(true)
     try {
-      const API = (process.env.NEXT_PUBLIC_API_BASE || "").replace(/\/+\, "")
-
+      const API = (process.env.NEXT_PUBLIC_API_BASE || "").replace(/\/+$/, "");
       const r = await fetch(`/auth/register.php`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

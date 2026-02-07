@@ -126,6 +126,13 @@ const [username, setUsername] = useState("")
 
       const API = (process.env.NEXT_PUBLIC_API_BASE || "").replace(/\/+$/, "");
 
+      if (!API) {
+        setLoading(false)
+        toast.error("API base belum diset (NEXT_PUBLIC_API_BASE)")
+        return
+      }
+
+
       const r = await fetch(`${API}/auth/register.php`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

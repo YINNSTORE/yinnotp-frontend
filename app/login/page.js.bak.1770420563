@@ -1,0 +1,162 @@
+"use client"
+
+import { useEffect, useState } from "react"
+import toast, { Toaster } from "react-hot-toast"
+
+const TTL = 12 * 60 * 60 * 1000
+
+export default function LoginPage(){
+
+  const [form,setForm] = useState({
+    user:"",
+    password:"",
+    remember:false
+  })
+
+  const [last,setLast] = useState(null)
+  const [showPwd,setShowPwd] = useState(false)
+  const [loading,setLoading] = useState(false)
+
+  useEffect(()=>{
+    try{
+      const raw = localStorage.getItem("yinnotp:last_login")
+      if(!raw) return
+
+      const obj = JSON.parse(raw)
+      if(Date.now() - obj.ts > TTL){
+        localStorage.removeItem("yinnotp:last_login")
+        return
+      }
+
+      setLast(obj)
+    }catch{}
+  },[])
+
+  async function submit(e){
+    e.preventDefault()
+
+    if(!form.user){
+      toast.error("Username / Email wajib diisi")
+      return
+    }
+
+    if(!form.password){
+      toast.error("Password wajib diisi")
+      return
+    }
+
+    setLoading(true)
+
+    try{
+
+      const res = await fetch("/api/auth/login",{
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify({
+          user:form.user,
+          password:form.password
+        })
+      })
+
+      const j = await res.json().catch(()=>null)
+
+      if(!res.ok || !j?.ok){
+
+        const msg = j?.message || "Login gagal"
+
+        if(msg.toLowerCase().includes("not found"))
+          toast.error("User tidak ditemukan")
+
+        else if(msg.toLowerCase().includes("password"))
+          toast.error("Password salah")
+
+        else
+          toast.error(msg)
+
+        setLoading(false)
+        return
+      }
+
+      const session = {
+        username:j.data.username,
+        email:j.data.email,
+        ts:Date.now()
+      }
+
+      localStorage.setItem("yinnotp:session",JSON.stringify(session))
+      localStorage.setItem("yinnotp:last_login",JSON.stringify(session))
+
+      toast.success("Login berhasil")
+
+      setTimeout(()=>{
+        window.location.href="/dashboard"
+      },800)
+
+    }catch{
+      toast.error("Server error")
+    }
+
+    setLoading(false)
+  }
+
+  function loginLast(){
+    if(!last){
+      toast.error("Belum ada session")
+      return
+    }
+
+    localStorage.setItem("yinnotp:session",JSON.stringify(last))
+
+    toast.success("Login dari session")
+
+    setTimeout(()=>{
+      window.location.href="/dashboard"
+    },600)
+  }
+
+  return(
+  <div className="login-body">
+
+    <Toaster position="top-right"/>
+
+    <div className="login-card">
+
+      <div className="logo-placeholder">☄𔓎</div>
+
+      <h2>Welcome back 👋</h2>
+
+      {last &&
+      <div className="saved-account" onClick={loginLast} style={{cursor:"pointer"}}>
+        <div>
+          <b>Masuk sebagai {last.username}</b>
+          <div>{last.email}</div>
+        </div>
+      </div>
+      }
+
+      <form onSubmit={submit}>
+
+        <input
+          placeholder="Username or email"
+          value={form.user}
+          onChange={e=>setForm({...form,user:e.target.value})}
+        />
+
+        <input
+          type={showPwd?"text":"password"}
+          placeholder="Password"
+          value={form.password}
+          onChange={e=>setForm({...form,password:e.target.value})}
+        />
+
+        <button disabled={loading}>
+          {loading?"Memproses...":"Masuk"}
+        </button>
+
+      </form>
+
+    </div>
+
+  </div>
+  )
+}

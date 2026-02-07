@@ -1,0 +1,207 @@
+"use client"
+
+import "./login.css"
+import { useEffect, useMemo, useState } from "react"
+import toast, { Toaster } from "react-hot-toast"
+
+const TTL = 12 * 60 * 60 * 1000
+
+function getLastSession() {
+  try {
+    const raw = localStorage.getItem("yinnotp:last_session") || localStorage.getItem("yinnotp:last_login")
+    if (!raw) return null
+    const obj = JSON.parse(raw)
+    const ts = Number(obj?.ts || obj?.time || 0)
+    if (!ts || (Date.now() - ts) > TTL) {
+      localStorage.removeItem("yinnotp:last_session")
+      localStorage.removeItem("yinnotp:last_login")
+      return null
+    }
+    if (!obj?.username || !obj?.email) return null
+    return { username: obj.username, email: obj.email, ts }
+  } catch {
+    try {
+      localStorage.removeItem("yinnotp:last_session")
+      localStorage.removeItem("yinnotp:last_login")
+    } catch {}
+    return null
+  }
+}
+
+export default function LoginPage() {
+  const [showPwd, setShowPwd] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  const [last, setLast] = useState(null)
+  const [ident, setIdent] = useState("")
+  const [password, setPassword] = useState("")
+  const [remember, setRemember] = useState(true)
+
+  useEffect(() => {
+    setLast(getLastSession())
+  }, [])
+
+  const canSubmit = useMemo(() => {
+    return ident.trim().length > 0 && password.length > 0 && !loading
+  }, [ident, password, loading])
+
+  function clickSaved() {
+    if (!last) return
+    setIdent(last.email) // isi ke field, biar user tinggal masukin password
+    toast("Session loaded", { icon: "☄" })
+  }
+
+  async function onSubmit(e) {
+    e.preventDefault()
+    if (!canSubmit) {
+      toast.error("Lengkapi Username/email & Password")
+      return
+    }
+
+    setLoading(true)
+    try {
+      const r = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ident, password })
+      })
+
+      const j = await r.json().catch(() => null)
+
+      if (!r.ok || !j?.ok) {
+        const msg = j?.message || "Login gagal"
+        toast.error(msg)
+        setLoading(false)
+        return
+      }
+
+      // simpan last session (TTL 12 jam)
+      const sess = {
+        username: j.data?.username || "",
+        email: j.data?.email || "",
+        ts: Date.now()
+      }
+
+      if (remember) {
+        localStorage.setItem("yinnotp:last_session", JSON.stringify(sess))
+        localStorage.setItem("yinnotp:last_login", JSON.stringify(sess)) // kompat lama
+      } else {
+        // kalau tidak remember, tetap simpan 12 jam biar "Masuk sebagai" bisa muncul,
+        // tapi user bisa clear manual di browser.
+        localStorage.setItem("yinnotp:last_session", JSON.stringify(sess))
+      }
+
+      toast.success("Login sukses")
+      setTimeout(() => {
+        window.location.href = "/"
+      }, 450)
+    } catch {
+      toast.error("Server error / koneksi putus")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="login-wrap">
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 2200,
+          style: { fontWeight: 700, borderRadius: 12 },
+        }}
+      />
+
+      <div className="dots-decoration dots-top-right"></div>
+      <div className="dots-decoration dots-bottom-left"></div>
+
+      <div className="login-card">
+        <div className="logo-container">
+          <div className="logo-placeholder">☄𔓎</div>
+        </div>
+
+        <h2>Welcome back! 👋</h2>
+        <p className="subtitle">Please sign-in to your account to view the dashboard</p>
+
+        <div className="social-buttons">
+          <button className="btn-social" type="button" onClick={() => toast("Google login coming soon", { icon: "🕒" })}>
+            <img src="https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png" width="18" alt="Google" />
+            Google
+          </button>
+          <button className="btn-social" type="button" onClick={() => toast("GitHub login coming soon", { icon: "🕒" })}>
+            <i className="fab fa-github"></i>
+            GitHub
+          </button>
+        </div>
+
+        {/* FIX #2: hide if no history */}
+        {last?.username && last?.email ? (
+          <div className="saved-account" onClick={clickSaved} role="button" aria-label="Load last session">
+            <div className="account-info">
+              <div className="avatar">{String(last.username).slice(0, 1).toUpperCase()}</div>
+              <div className="account-details">
+                <p>Masuk sebagai {last.username}</p>
+                <span>{last.email}</span>
+              </div>
+            </div>
+            <span style={{ fontSize: 22, fontWeight: 900, color: "var(--navy-dark)" }}>☄</span>
+          </div>
+        ) : null}
+
+        <div className="divider">or continue with email</div>
+
+        <form onSubmit={onSubmit}>
+          <div className="form-group">
+            <div className="input-wrapper">
+              <i className="fa-regular fa-user prefix"></i>
+              <input
+                type="text"
+                placeholder="Username or email"
+                value={ident}
+                onChange={(e) => setIdent(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <div className="input-wrapper">
+              <i className="fa-solid fa-lock prefix"></i>
+              <input
+                type={showPwd ? "text" : "password"}
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <i
+                className={`fa-regular ${showPwd ? "fa-eye" : "fa-eye-slash"} suffix`}
+                onClick={() => setShowPwd((s) => !s)}
+                role="button"
+                aria-label="Toggle password"
+              ></i>
+            </div>
+          </div>
+
+          <div className="form-options">
+            <label className="remember-me" onClick={() => setRemember((v) => !v)}>
+              <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+              Remember Me
+            </label>
+            <a href="#" className="forgot-pass" onClick={(e) => { e.preventDefault(); toast("Forgot password coming soon", { icon: "🕒" }) }}>
+              Forgot Password?
+            </a>
+          </div>
+
+          <button type="submit" className="btn-submit" disabled={!canSubmit}>
+            {loading ? "Memproses..." : "Masuk"}
+          </button>
+        </form>
+
+        <p className="footer-text">
+          New on our platform? <a href="/register">Create an account</a>
+        </p>
+      </div>
+    </div>
+  )
+}

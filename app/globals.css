@@ -1,0 +1,469 @@
+:root {
+  --primary-navy: #1e3a8a;
+  --primary-blue: #3b82f6;
+  --gradient-main: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+  --bg-body: #FFFFFF;
+  --bg-light: #F8F7FA;
+  --card-bg: #FFFFFF;
+  --text-main: #444050;
+  --text-muted: #8A8D93;
+  --nav-bg: #FFFFFF;
+}
+
+[data-theme="dark"] {
+  --bg-body: #1f2433;
+  --bg-light: #1f2433;
+  --card-bg: #2a3042;
+  --text-main: #cfd3ec;
+  --text-muted: #a3a7cc;
+  --nav-bg: rgba(31,36,51,.88);
+  --primary-navy: #7367f0;
+}
+
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: 'Public Sans', sans-serif;
+}
+
+
+html, body {
+  background-color: var(--bg-body);
+  color: var(--text-main);
+  overflow-x: hidden;
+}
+
+nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 8%;
+  background: var(--nav-bg);
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.logo-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-komet {
+  font-size: 32px;
+  font-weight: 900;
+  background: var(--gradient-main);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.brand-name {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--primary-navy);
+  letter-spacing: -0.5px;
+}
+
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.theme-toggle {
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: var(--text-main);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 50%;
+}
+
+.btn-login {
+  padding: 8px 18px;
+  border-radius: 6px;
+  background: var(--gradient-main);
+  color: white;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 13px;
+  transition: 0.3s;
+  box-shadow: 0 4px 10px rgba(30, 58, 138, 0.15);
+}
+
+.btn-login:hover { transform: scale(1.02); opacity: 0.9; }
+
+.hero {
+  padding: 60px 8% 100px 8%;
+  text-align: center;
+  background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.05), transparent),
+              radial-gradient(circle at bottom left, rgba(30, 58, 138, 0.05), transparent);
+}
+
+.hero h1 {
+  font-size: 42px;
+  font-weight: 900;
+  color: var(--text-main);
+  line-height: 1.2;
+  margin-bottom: 20px;
+}
+
+.hero h1 span {
+  background: var(--gradient-main);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero p {
+  font-size: 17px;
+  color: var(--text-muted);
+  max-width: 600px;
+  margin: 0 auto 40px auto;
+  line-height: 1.6;
+}
+
+.btn-cta {
+  padding: 14px 35px;
+  font-size: 15px;
+  font-weight: 700;
+  border-radius: 10px;
+  border: none;
+  background: var(--gradient-main);
+  color: white;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(30, 58, 138, 0.2);
+}
+
+.hero-img {
+  margin-top: 50px;
+  display: flex;
+  justify-content: center;
+}
+
+.hero-img img {
+  max-width: 100%;
+  width: 600px;
+  border-radius: 20px;
+  filter: drop-shadow(0 20px 40px rgba(0,0,0,0.12));
+}
+
+.features {
+  padding: 80px 8%;
+  background: var(--bg-light);
+  text-align: center;
+}
+
+.section-tag {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--primary-blue);
+  padding: 6px 16px;
+  border-radius: 50px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-bottom: 15px;
+  display: inline-block;
+}
+
+.features h2 {
+  font-size: 28px;
+  font-weight: 800;
+  margin-bottom: 40px;
+  color: var(--text-main);
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 25px;
+}
+
+.feature-card {
+  background: var(--card-bg);
+  padding: 35px 25px;
+  border-radius: 15px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.04);
+}
+
+.feature-card h3{
+  margin-top: 10px;
+  font-weight: 800;
+  color: var(--text-main);
+}
+.feature-card p{
+  margin-top: 10px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.f-icon {
+  width: 50px;
+  height: 50px;
+  background: rgba(59, 130, 246, 0.08);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: var(--primary-blue);
+  margin: 0 auto 15px auto;
+}
+
+footer {
+  padding: 50px 8% 30px 8%;
+  background: #0f172a;
+  color: white;
+  text-align: center;
+}
+
+.footer-logo {
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.footer-logo .logo-komet {
+  background: none;
+  -webkit-text-fill-color: #3b82f6;
+  font-size: 40px;
+}
+
+.footer-logo h2 {
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 24px;
+  letter-spacing: -0.5px;
+}
+
+.copyright {
+  border-top: 1px solid rgba(255,255,255,0.1);
+  padding-top: 25px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+@media (max-width: 768px) {
+  .hero h1 { font-size: 30px; }
+  .nav-right { gap: 10px; }
+}
+
+/* --- Dark mode: hero image follow theme --- */
+.hero-img { position: relative; }
+.hero-img img { display:block; }
+
+[data-theme="dark"] .hero-img img {
+  filter: brightness(.85) contrast(1.05) saturate(.95);
+}
+
+[data-theme="dark"] .hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 30% 35%, rgba(124,58,237,.22), transparent 55%),
+    radial-gradient(circle at 70% 55%, rgba(59,130,246,.18), transparent 60%),
+    linear-gradient(180deg, rgba(0,0,0,.12), rgba(0,0,0,.20));
+  mix-blend-mode: normal;
+}
+
+.hero { position: relative; overflow: hidden; }
+
+/* GLOBAL_UNIFORM_DARK_BG */
+[data-theme="dark"] html,
+[data-theme="dark"] body {
+  background: radial-gradient(circle at 15% 15%, rgba(124,58,237,.18), transparent 55%),
+              radial-gradient(circle at 85% 30%, rgba(59,130,246,.14), transparent 55%),
+              linear-gradient(180deg, #1f2433 0%, #1f2433 100%);
+}
+
+/* bikin semua section ngikut background utama (no patch) */
+[data-theme="dark"] .hero { background: transparent !important; }
+[data-theme="dark"] .features { background: transparent !important; }
+
+/* nav biar nyatu */
+[data-theme="dark"] nav {
+  background: var(--nav-bg) !important;
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+
+/* card/features biar tetep kebaca tapi konsisten */
+[data-theme="dark"] .feature-card {
+  background: rgba(42,48,66,.92) !important;
+  border: 1px solid rgba(255,255,255,.06);
+}
+
+/* biar text tag ga terlalu pudar */
+[data-theme="dark"] .section-tag {
+  background: rgba(124,58,237,.16) !important;
+  color: #c7bfff !important;
+}
+
+/* THEME_TRANSITION_60FPS */
+:root {
+  --theme-ease: cubic-bezier(.2,.8,.2,1);
+  --theme-dur: 240ms;
+}
+
+/* hanya properti yang “murah” buat transisi */
+html, body, nav, header, section, footer,
+.feature-card, .btn-login, .btn-cta {
+  transition:
+    background-color var(--theme-dur) var(--theme-ease),
+    color var(--theme-dur) var(--theme-ease),
+    border-color var(--theme-dur) var(--theme-ease),
+    box-shadow var(--theme-dur) var(--theme-ease),
+    filter var(--theme-dur) var(--theme-ease);
+}
+
+/* bantu browser prepare perubahan tema */
+html {
+  color-scheme: light;
+}
+[data-theme="dark"] html {
+  color-scheme: dark;
+}
+
+/* optimasi compositing area besar */
+.hero, .features, nav, .feature-card, .hero-img img {
+  will-change: background-color, color, border-color, filter;
+}
+
+/* biar toggle ga terasa “nendang” */
+.theme-toggle {
+  transition: transform 180ms var(--theme-ease), background-color var(--theme-dur) var(--theme-ease);
+}
+.theme-toggle:active { transform: scale(.92); }
+
+/* user yang prefer no motion */
+@media (prefers-reduced-motion: reduce) {
+  html, body, nav, header, section, footer,
+  .feature-card, .btn-login, .btn-cta, .theme-toggle {
+    transition: none !important;
+  }
+}
+
+/* CROSSFADE_THEME_LAYER (GPU-friendly) */
+body {
+  position: relative;
+}
+
+/* layer base (light) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 420ms cubic-bezier(.22,1,.36,1);
+  will-change: opacity;
+  background:
+    radial-gradient(circle at 10% 10%, rgba(59,130,246,.08), transparent 55%),
+    radial-gradient(circle at 90% 30%, rgba(30,58,138,.06), transparent 60%),
+    linear-gradient(180deg, #ffffff 0%, #ffffff 100%);
+}
+
+/* layer dark (overlay) */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 420ms cubic-bezier(.22,1,.36,1);
+  will-change: opacity;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(124,58,237,.22), transparent 55%),
+    radial-gradient(circle at 85% 30%, rgba(59,130,246,.16), transparent 55%),
+    linear-gradient(180deg, #1f2433 0%, #1f2433 100%);
+}
+
+/* toggle: crossfade only (super smooth) */
+[data-theme="dark"] body::before { opacity: 0; }
+[data-theme="dark"] body::after  { opacity: 1; }
+
+/* make major sections transparent so they follow the layer */
+.hero, .features { background: transparent !important; }
+html, body { background: transparent !important; }
+
+/* keep cards consistent but light transition minimal */
+.feature-card {
+  transition: background-color 200ms cubic-bezier(.2,.8,.2,1), border-color 200ms cubic-bezier(.2,.8,.2,1);
+}
+
+/* dark card look */
+[data-theme="dark"] .feature-card {
+  background: rgba(42,48,66,.92) !important;
+  border: 1px solid rgba(255,255,255,.06);
+}
+
+/* nav glass effect in dark */
+[data-theme="dark"] nav {
+  background: rgba(31,36,51,.78) !important;
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+
+/* reduce heavy global transitions (let crossfade do the work) */
+html, body, nav, header, section, footer {
+  transition: none !important;
+}
+
+/* PREMIUM_SMOOTH_THEME */
+:root {
+  --theme-dur: 560ms;
+  --theme-ease: cubic-bezier(.16,1,.3,1); /* super smooth easeOut */
+}
+
+/* layer transitions */
+body::before,
+body::after {
+  transition:
+    opacity var(--theme-dur) var(--theme-ease),
+    filter var(--theme-dur) var(--theme-ease);
+}
+
+/* add subtle blur during transition */
+body::before {
+  filter: blur(0px);
+}
+body::after {
+  filter: blur(8px);
+}
+
+[data-theme="dark"] body::before {
+  filter: blur(8px);
+}
+[data-theme="dark"] body::after {
+  filter: blur(0px);
+}
+
+/* smooth cards and nav */
+.feature-card,
+nav {
+  transition:
+    background-color var(--theme-dur) var(--theme-ease),
+    border-color var(--theme-dur) var(--theme-ease),
+    box-shadow var(--theme-dur) var(--theme-ease);
+}
+
+/* smooth icon rotation */
+.theme-toggle i {
+  transition: transform var(--theme-dur) var(--theme-ease);
+}
+[data-theme="dark"] .theme-toggle i {
+  transform: rotate(180deg);
+}

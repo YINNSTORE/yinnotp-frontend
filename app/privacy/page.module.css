@@ -1,0 +1,96 @@
+.wrapper{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:28px 14px;
+  background:
+    radial-gradient(1200px 600px at 15% 10%, rgba(37,99,235,.10), transparent 60%),
+    radial-gradient(900px 500px at 85% 85%, rgba(59,130,246,.10), transparent 55%),
+    #f6f9ff;
+  position:relative;
+  overflow:hidden;
+}
+.dots{
+  position:absolute;
+  width:220px;height:220px;
+  background-image:radial-gradient(#cfe0ff 1.2px, transparent 1.2px);
+  background-size:14px 14px;
+  opacity:.55;
+  border-radius:18px;
+}
+.dotsTR{ top:18px; right:18px; }
+.dotsBL{ bottom:18px; left:18px; }
+
+.card{
+  width:min(720px, 96vw);
+  background:rgba(255,255,255,.92);
+  border:1px solid rgba(15,23,42,.08);
+  box-shadow:0 18px 40px rgba(15,23,42,.10);
+  border-radius:18px;
+  padding:18px 18px 14px;
+  backdrop-filter: blur(8px);
+  position:relative;
+}
+.header{
+  display:flex;
+  gap:12px;
+  align-items:center;
+  margin-bottom:10px;
+}
+.badge{
+  width:44px;height:44px;
+  border-radius:14px;
+  display:grid;
+  place-items:center;
+  background:linear-gradient(135deg, rgba(37,99,235,.16), rgba(59,130,246,.10));
+  border:1px solid rgba(37,99,235,.18);
+  font-size:18px;
+}
+.title{
+  font-size:22px;
+  font-weight:900;
+  margin:0;
+  color:#0f172a;
+}
+.sub{
+  margin:2px 0 0;
+  color:rgba(15,23,42,.65);
+  font-size:13px;
+  font-weight:600;
+}
+
+.section{
+  margin-top:14px;
+  padding-top:14px;
+  border-top:1px dashed rgba(15,23,42,.12);
+}
+.h{
+  margin:0 0 8px;
+  font-size:14px;
+  font-weight:900;
+  color:#1e40af;
+}
+.p, .li{
+  color:rgba(15,23,42,.78);
+  font-size:13px;
+  line-height:1.65;
+}
+.ul{ margin:0; padding-left:18px; }
+.li{ margin:6px 0; }
+
+.footer{
+  margin-top:16px;
+  padding-top:12px;
+  border-top:1px dashed rgba(15,23,42,.12);
+  display:flex;
+  justify-content:flex-end;
+  gap:12px;
+  font-size:13px;
+  font-weight:800;
+}
+.link{
+  color:#2563eb;
+  text-decoration:none;
+}
+.link:hover{ text-decoration:underline; }

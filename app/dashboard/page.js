@@ -1,81 +1,199 @@
 "use client"
+
 import { useEffect, useState } from "react"
+import "./dashboard.css"
 
-export default function Dashboard() {
+function moneyIDR(n) {
+  const num = Number(n || 0)
+  return num.toLocaleString("id-ID")
+}
 
-  const [services, setServices] = useState([])
-  const [serviceId, setServiceId] = useState("14")
-  const [countries, setCountries] = useState([])
-  const [loading, setLoading] = useState(false)
+export default function DashboardPage() {
+  const [user, setUser] = useState({ username: "yinnzzmc", greeting: "Selamat malam 💤" })
+  const [balance, setBalance] = useState(1000)
+  const [online, setOnline] = useState(true)
+  const [latency, setLatency] = useState(235)
+  const [notifOn, setNotifOn] = useState(true)
 
-  async function loadServices(){
-    const r = await fetch("/api/rumahotp/services").then(x=>x.json()).catch(()=>null)
-    if(r?.success) setServices(r.data || [])
-  }
-
-  async function loadCountries(){
-    setLoading(true)
-    const r = await fetch(`/api/rumahotp/countries?service_id=${encodeURIComponent(serviceId)}`).then(x=>x.json()).catch(()=>null)
-    if(r?.success) setCountries(r.data || [])
-    setLoading(false)
-  }
-
-  useEffect(()=>{ loadServices(); loadCountries() }, [])
-  useEffect(()=>{ loadCountries() }, [serviceId])
+  // contoh: nanti ganti dari API kamu
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("yinnotp:last_login")
+      if (raw) {
+        const j = JSON.parse(raw)
+        if (j?.username) setUser((p) => ({ ...p, username: j.username }))
+      }
+    } catch {}
+  }, [])
 
   return (
-    <div style={{padding:"22px", maxWidth:1100, margin:"0 auto"}}>
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:12}}>
-        <div>
-          <div style={{fontSize:12, opacity:.7}}>YinnOTP</div>
-          <div style={{fontSize:26, fontWeight:900, marginTop:6}}>Negara (Countries V2)</div>
-          <div style={{fontSize:13, opacity:.75, marginTop:6}}>service_id wajib (sesuai docs)</div>
+    <div className="dash">
+      {/* top bar */}
+      <header className="dash-top">
+        <div className="dash-profile">
+          <div className="dash-avatar">{String(user.username || "U").slice(0, 1).toUpperCase()}</div>
+          <div className="dash-who">
+            <div className="dash-username">{user.username}</div>
+            <div className="dash-sub">{user.greeting}</div>
+          </div>
         </div>
-        <a href="/" style={btn()}>Back</a>
-      </div>
 
-      <div style={{marginTop:14, display:"flex", gap:10, flexWrap:"wrap"}}>
-        <select value={serviceId} onChange={(e)=>setServiceId(e.target.value)} style={select()}>
-          <option value="14">Service ID 14 (default)</option>
-          {services.map(s => (
-            <option key={s.service_code} value={String(s.service_code)}>
-              {s.service_name} (ID {s.service_code})
-            </option>
-          ))}
-        </select>
+        <div className="dash-actions">
+          <button className="icon-btn" type="button" aria-label="Theme">
+            <span className="icon">☀️</span>
+          </button>
+          <button className="icon-btn" type="button" aria-label="Account">
+            <span className="icon">👤</span>
+          </button>
+        </div>
+      </header>
 
-        <button onClick={loadCountries} style={btnPrimary()}>{loading ? "Loading..." : "Refresh"}</button>
-      </div>
-
-      <div style={{marginTop:14, display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))", gap:12}}>
-        {countries.map(c => (
-          <div key={c.number_id} style={card()}>
-            <div style={{display:"flex", alignItems:"center", gap:10}}>
-              <img src={c.img} width="38" height="26" style={{borderRadius:7}} />
-              <div style={{fontWeight:900}}>{c.name}</div>
+      {/* content */}
+      <main className="dash-main">
+        {/* row: balance + hero */}
+        <section className="grid-2">
+          <div className="card balance-card">
+            <div className="card-row">
+              <div className="bal-icon">💳</div>
+              <div className="bal-meta">
+                <div className="label">Saldo Kamu</div>
+                <div className="value">{moneyIDR(balance)} IDR</div>
+              </div>
+              <button className="btn-soft" type="button" onClick={() => (window.location.href = "/topup")}>
+                Top Up
+              </button>
             </div>
 
-            <div style={meta()}>prefix: {c.prefix} • iso: {c.iso_code}</div>
-            <div style={meta()}>stock_total: {c.stock_total} • rate: {c.rate}</div>
+            <div className="status-row">
+              <div className={`pill ${online ? "pill-on" : "pill-off"}`}>
+                <span className="dot" />
+                {online ? "Online" : "Offline"}
+              </div>
+              <div className="muted">
+                <b>{latency}ms</b> response server saat ini
+              </div>
+            </div>
+          </div>
 
-            <div style={{marginTop:10, fontSize:12, opacity:.8, fontWeight:800}}>Pricelist</div>
-            <div style={{marginTop:8, display:"grid", gap:8}}>
-              {(c.pricelist || []).slice(0,3).map((p, idx) => (
-                <div key={idx} style={{background:"#071022", border:"1px solid #1f2937", borderRadius:12, padding:10}}>
-                  <div style={{fontSize:12, fontWeight:900}}>provider_id: {p.provider_id} • server_id: {p.server_id}</div>
-                  <div style={{fontSize:12, opacity:.75, marginTop:6}}>stock: {p.stock} • rate: {p.rate} • price: {p.price_format}</div>
-                </div>
+          <div className="card hero-card">
+            <div className="hero-left">
+              <div className="hero-title">Get Virtual Number</div>
+              <div className="hero-sub">OTP access for 1,000+ apps across countries</div>
+
+              <div className="hero-icons">
+                <span className="app-ic">🟢</span>
+                <span className="app-ic">✈️</span>
+                <span className="app-ic">📘</span>
+                <span className="app-ic">❓</span>
+                <span className="app-ic">+99</span>
+              </div>
+            </div>
+
+            <button className="hero-next" type="button" onClick={() => (window.location.href = "/order")}>
+              Pilih Nomor <span className="arr">›</span>
+            </button>
+          </div>
+        </section>
+
+        {/* pending */}
+        <section className="card pending-card">
+          <div className="card-head">
+            <div className="card-title">Pesanan Pending</div>
+            <button className="icon-btn small" type="button" aria-label="Refresh">
+              🔄
+            </button>
+          </div>
+
+          <div className="pending-body">
+            <div className="pending-illu">📦</div>
+            <div className="pending-title">Tidak ada pesanan</div>
+            <div className="pending-sub">Pesanan aktif akan muncul disini</div>
+            <button className="btn-primary" type="button" onClick={() => (window.location.href = "/order")}>
+              + Buat Pesanan
+            </button>
+          </div>
+        </section>
+
+        {/* bottom grid */}
+        <section className="grid-2 bottom-grid">
+          {/* notif */}
+          <div className="card">
+            <div className="card-head">
+              <div className="card-title">Notifikasi</div>
+              <div className="muted-sm">
+                <span className={`mini-dot ${online ? "on" : "off"}`} /> Aktif
+              </div>
+            </div>
+
+            <div className="seg">
+              <button className={`seg-btn ${notifOn ? "active" : ""}`} type="button" onClick={() => setNotifOn(true)}>
+                Browser
+              </button>
+              <button className={`seg-btn ${!notifOn ? "active" : ""}`} type="button" onClick={() => setNotifOn(false)}>
+                Matikan
+              </button>
+            </div>
+
+            <div className="info-box">
+              <div className="info-title">Message Notifikasi Real-time</div>
+              <div className="info-text">
+                Disarankan gunakan notifikasi real-time agar SMS masuk cepat tanpa delay walaupun situs ditutup saat daftar nomor.
+              </div>
+            </div>
+          </div>
+
+          {/* faq */}
+          <div className="card">
+            <div className="card-head">
+              <div className="card-title">Pertanyaan Umum</div>
+              <div className="muted-sm">Yang sering diajukan</div>
+            </div>
+
+            <div className="faq">
+              {[
+                { t: "Ayo belajar membaca!", i: "📘" },
+                { t: "OTP gak masuk", i: "⏱️" },
+                { t: "Cancel tapi saldo terpotong", i: "🧾" },
+                { t: "Lupa cancel active order", i: "🧠" },
+                { t: "Syarat refund", i: "👁️" },
+              ].map((x, idx) => (
+                <button key={idx} className="faq-item" type="button" onClick={() => (window.location.href = "/help")}>
+                  <span className="faq-ic">{x.i}</span>
+                  <span className="faq-t">{x.t}</span>
+                  <span className="faq-arr">⌄</span>
+                </button>
               ))}
             </div>
           </div>
-        ))}
-      </div>
+        </section>
+      </main>
+
+      {/* bottom nav */}
+      <nav className="bottom-nav" aria-label="Bottom Navigation">
+        <button className="nav-item active" type="button" onClick={() => (window.location.href = "/dashboard")}>
+          <span className="nav-ic">🏠</span>
+          <span className="nav-tx">Home</span>
+        </button>
+
+        <button className="nav-item" type="button" onClick={() => (window.location.href = "/topup")}>
+          <span className="nav-ic">💰</span>
+          <span className="nav-tx">Deposit</span>
+        </button>
+
+        <button className="nav-fab" type="button" onClick={() => (window.location.href = "/order")} aria-label="Order">
+          🛍️
+        </button>
+
+        <button className="nav-item" type="button" onClick={() => (window.location.href = "/history")}>
+          <span className="nav-ic">📈</span>
+          <span className="nav-tx">Activity</span>
+        </button>
+
+        <button className="nav-item" type="button" onClick={() => (window.location.href = "/settings")}>
+          <span className="nav-ic">👤</span>
+          <span className="nav-tx">Profile</span>
+        </button>
+      </nav>
     </div>
   )
 }
-
-function card(){ return {background:"#0f172a", border:"1px solid #1f2937", borderRadius:14, padding:14} }
-function meta(){ return {fontSize:12, opacity:.75, marginTop:8} }
-function select(){ return {padding:"10px 12px", borderRadius:12, border:"1px solid #1f2937", background:"#0f172a", color:"#fff", fontWeight:800} }
-function btn(){ return {textDecoration:"none", padding:"10px 12px", borderRadius:12, border:"1px solid #1f2937", background:"#0f172a", color:"#fff", fontSize:13, fontWeight:900} }
-function btnPrimary(){ return {padding:"10px 12px", borderRadius:12, border:"1px solid #1f2937", background:"#f59e0b", color:"#111827", fontSize:13, fontWeight:900, cursor:"pointer"} }

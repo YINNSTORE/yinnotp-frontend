@@ -1,31 +1,48 @@
-import { NextResponse } from "next/server";
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
 
-export const dynamic = "force-dynamic";
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || "").replace(/\/+$/, "")
 
 export async function POST(req) {
   try {
-    const body = await req.json();
-    const API_BASE = (process.env.API_BASE || process.env.NEXT_PUBLIC_API_BASE || "").replace(/\/+$/, "");
     if (!API_BASE) {
-      return NextResponse.json({ ok: false, message: "API_BASE belum diset" }, { status: 500 });
+      return new Response(
+        JSON.stringify({ ok: false, message: "API base belum diset (NEXT_PUBLIC_API_BASE)" }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      )
     }
 
-    const r = await fetch(`${API_BASE}/auth/register.php`, {
+    const body = await req.json().catch(() => ({}))
+
+    const upstream = await fetch(`${API_BASE}/auth/register.php`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       cache: "no-store",
-    });
+    })
 
-    const text = await r.text();
-    return new NextResponse(text, {
-      status: r.status,
+    const text = await upstream.text()
+
+    // return apa adanya (biar pesan backend kebaca)
+    return new Response(text, {
+      status: upstream.status,
       headers: {
-        "Content-Type": r.headers.get("content-type") || "application/json",
+        "Content-Type": upstream.headers.get("content-type") || "application/json",
         "Cache-Control": "no-store",
       },
-    });
-  } catch {
-    return NextResponse.json({ ok: false, message: "Server error" }, { status: 500 });
+    })
+  } catch (e) {
+    return new Response(
+      JSON.stringify({ ok: false, message: "Server error (route /api/register)" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    )
   }
+}
+
+// Optional: healthcheck cepat
+export async function GET() {
+  return new Response(JSON.stringify({ ok: true, route: "/api/register" }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+  })
 }

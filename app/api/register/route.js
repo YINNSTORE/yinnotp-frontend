@@ -23,7 +23,6 @@ export async function POST(req) {
 
     const text = await upstream.text()
 
-    // return apa adanya (biar pesan backend kebaca)
     return new Response(text, {
       status: upstream.status,
       headers: {
@@ -39,7 +38,6 @@ export async function POST(req) {
   }
 }
 
-// Optional: healthcheck cepat
 export async function GET() {
   return new Response(JSON.stringify({ ok: true, route: "/api/register" }), {
     status: 200,

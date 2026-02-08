@@ -17,7 +17,6 @@ function parseUsedMessage(msgRaw) {
   const raw = normalizeMessage(msgRaw)
   const m = raw.toLowerCase()
 
-  // detect "already used" in many variants
   const used =
     m.includes("already used") ||
     m.includes("sudah dipakai") ||
@@ -35,7 +34,6 @@ function parseUsedMessage(msgRaw) {
   if (m.includes("email") && used) return "Email already used"
   if (m.includes("username") && used) return "Username already used"
 
-  // explicit codes (kalau backend pakai code)
   if (m.includes("email_already") || m.includes("email_used")) return "Email already used"
   if (m.includes("username_already") || m.includes("username_used")) return "Username already used"
 
@@ -43,45 +41,13 @@ function parseUsedMessage(msgRaw) {
 }
 
 export default function RegisterPage() {
-  const [agree, setAgree] = useState(false);
-
   const [showPwd, setShowPwd] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const [last, setLast] = useState(null)
-
-  
   const LAST_TTL_MS = 12 * 60 * 60 * 1000
 
-  // LOAD_LAST_SESSION_TTL12H
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("yinnotp:last_session")
-      if (!raw) { setLast(null); return }
-      const obj = JSON.parse(raw)
-      const ts = Number(obj && obj.ts ? obj.ts : 0)
-      if (!ts || (Date.now() - ts) > LAST_TTL_MS) {
-        localStorage.removeItem("yinnotp:last_session")
-        setLast(null)
-        return
-      }
-      if (obj && obj.username && obj.email) {
-        setLast({ username: obj.username, email: obj.email })
-      } else {
-        setLast(null)
-      }
-    } catch {
-      try { localStorage.removeItem("yinnotp:last_session") } catch {}
-      setLast(null)
-    }
-  }, [])
-
-  // CLICK_SAVED_SESSION_AUTLOGIN
-  function onSavedSessionClick() {
-    try { localStorage.setItem("yinnotp:autologin", "1") } catch {}
-    window.location.href = "/login"
-  }
-const [username, setUsername] = useState("")
+  const [username, setUsername] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [policy, setPolicy] = useState(false)
@@ -91,10 +57,34 @@ const [username, setUsername] = useState("")
 
   useEffect(() => {
     try {
+      const raw = localStorage.getItem("yinnotp:last_session")
+      if (!raw) { setLast(null); return }
+      const obj = JSON.parse(raw)
+      const ts = Number(obj?.ts || 0)
+      if (!ts || (Date.now() - ts) > LAST_TTL_MS) {
+        localStorage.removeItem("yinnotp:last_session")
+        setLast(null)
+        return
+      }
+      if (obj?.username && obj?.email) setLast({ username: obj.username, email: obj.email })
+      else setLast(null)
+    } catch {
+      try { localStorage.removeItem("yinnotp:last_session") } catch {}
+      setLast(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
       const raw = localStorage.getItem("yinnotp:last_login")
       if (raw) setLast(JSON.parse(raw))
     } catch {}
   }, [])
+
+  function onSavedSessionClick() {
+    try { localStorage.setItem("yinnotp:autologin", "1") } catch {}
+    window.location.href = "/login"
+  }
 
   function focusPolicy() {
     setPolicyAttn(true)
@@ -115,6 +105,7 @@ const [username, setUsername] = useState("")
     if (!/^[a-zA-Z0-9_]+$/.test(u)) return toast.error("Username hanya huruf/angka/_")
     if (!isEmailValid(em)) return toast.error("Email tidak valid")
     if (password.length < 6) return toast.error("Password minimal 6 karakter")
+
     if (!policy) {
       toast.error("Wajib centang privacy policy & terms")
       focusPolicy()
@@ -123,23 +114,15 @@ const [username, setUsername] = useState("")
 
     setLoading(true)
     try {
-
-      const API = (process.env.NEXT_PUBLIC_API_BASE || "").replace(/\/+$/, "");
-
-      if (!API) {
-        setLoading(false)
-        toast.error("API base belum diset (NEXT_PUBLIC_API_BASE)")
-        return
-      }
-
-
-      const r = await fetch(`${API}/auth/register.php`, {
+      // ✅ penting: JANGAN POST ke /api/auth/* (ketangkep NextAuth)
+      // Kita pakai /api/register (route custom) yang akan proxy ke PHP API.
+      const r = await fetch("/api/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: u, email: em, password })
+        body: JSON.stringify({ username: u, email: em, password }),
+        cache: "no-store",
       })
 
-      // ✅ robust: baca raw text dulu biar message gak hilang
       const rawText = await r.text()
       let j = {}
       try { j = JSON.parse(rawText) } catch {}
@@ -155,15 +138,16 @@ const [username, setUsername] = useState("")
         const usedText = parseUsedMessage(msgAny)
         if (usedText) return toast.error(usedText)
 
-        // fallback: kalau server ngirim kosong/aneh, tetap tampilkan yg paling dekat
         const clean = normalizeMessage(msgAny)
         return toast.error(clean ? clean : "Gagal daftar")
       }
 
-      localStorage.setItem("yinnotp:last_login", JSON.stringify({
-        username: j.data?.username || u,
-        email: j.data?.email || em
-      }))
+      try {
+        localStorage.setItem("yinnotp:last_login", JSON.stringify({
+          username: j.data?.username || u,
+          email: j.data?.email || em
+        }))
+      } catch {}
 
       toast.success("Daftar berhasil")
       setTimeout(() => (window.location.href = "/login"), 1200)
@@ -181,7 +165,7 @@ const [username, setUsername] = useState("")
         toastOptions={{
           duration: 2200,
           style: {
-            minWidth: 280,   // ✅ lebih “panjang ke kiri” dikit
+            minWidth: 280,
             padding: "12px 14px",
             borderRadius: 10,
             fontWeight: 700,
@@ -201,25 +185,43 @@ const [username, setUsername] = useState("")
         <p className="subtitle">Buat akun dan nikmati layanannya</p>
 
         <div className="social-row">
-          <button className="btn-social" type="button" onClick={() => signIn("google", { callbackUrl: "/" })}>
-            <img src="https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png" width="18" alt="Google" />
+          <button
+            className="btn-social"
+            type="button"
+            onClick={() => signIn("google", { callbackUrl: "/" })}
+          >
+            <img
+              src="https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png"
+              width="18"
+              alt="Google"
+            />
             Google
           </button>
-          <button className="btn-social" type="button" onClick={() => signIn("github", { callbackUrl: "/" })}>
+
+          <button
+            className="btn-social"
+            type="button"
+            onClick={() => signIn("github", { callbackUrl: "/" })}
+          >
             <i className="fab fa-github"></i>
             GitHub
           </button>
         </div>
 
         {last?.username && last?.email ? (
-        <div className="session-info" onClick={onSavedSessionClick} role="button" title="Masuk cepat (auto login)">
+          <div
+            className="session-info"
+            onClick={onSavedSessionClick}
+            role="button"
+            title="Masuk cepat (auto login)"
+          >
             <div className="acc-details">
               <div className="avatar">{String(last.username).slice(0, 1).toUpperCase()}</div>
               <div className="acc-text">
                 <p>Masuk sebagai {last.username}</p>
                 <span>{last.email}</span>
               </div>
-</div>
+            </div>
             <span style={{ fontSize: 20, color: "var(--navy-dark)", fontWeight: 900 }}>☄</span>
           </div>
         ) : null}

@@ -29,3 +29,40 @@ body {
 .animate-status {
   animation: custom-pulse 2s infinite;
 }
+
+/* ===== YinnOTP theme tokens (dipakai landing) ===== */
+:root{
+  --yinn-bg: #F3F6F9;
+  --yinn-surface: #FFFFFF;
+  --yinn-text: #1e293b;
+  --yinn-muted: #64748b;
+  --yinn-border: #DBDADE;
+
+  --yinn-brand-from: #1e3a8a;
+  --yinn-brand-to: #3b82f6;
+
+  --yinn-soft: 0 10px 30px rgba(15, 23, 42, .08);
+}
+
+html[data-theme="dark"]{
+  --yinn-bg: #0b1220;
+  --yinn-surface: #0f172a;
+  --yinn-text: #e2e8f0;
+  --yinn-muted: #94a3b8;
+  --yinn-border: #1f2937;
+
+  --yinn-soft: 0 10px 30px rgba(0,0,0,.35);
+}
+
+/* Animasi floating (mirip move-up/move-down) */
+@keyframes yinn-float-up {
+  from { transform: translateY(6px); }
+  to   { transform: translateY(-6px); }
+}
+@keyframes yinn-float-down {
+  from { transform: translateY(-6px); }
+  to   { transform: translateY(6px); }
+}
+
+.yinn-float-up { animation: yinn-float-up 2.2s ease-in-out infinite alternate; }
+.yinn-float-down { animation: yinn-float-down 2.2s ease-in-out infinite alternate; }

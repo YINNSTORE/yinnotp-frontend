@@ -1,7 +1,6 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
+/* Base */
 :root {
   --background: #F3F6F9;
   --foreground: #1e293b;
@@ -10,59 +9,52 @@
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: 'Public Sans', sans-serif;
+  font-family: "Public Sans", sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Custom shadow untuk tampilan dashboard yang modern */
+/* Custom shadow */
 .shadow-soft {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
 }
 
-/* Animasi pulse untuk status server/online */
+/* Animasi status */
 @keyframes custom-pulse {
   0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
   70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
   100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
 }
+.animate-status { animation: custom-pulse 2s infinite; }
 
-.animate-status {
-  animation: custom-pulse 2s infinite;
-}
-
-/* ===== YinnOTP theme tokens (dipakai landing) ===== */
-:root{
+/* ===== YinnOTP theme tokens ===== */
+:root {
   --yinn-bg: #F3F6F9;
   --yinn-surface: #FFFFFF;
   --yinn-text: #1e293b;
   --yinn-muted: #64748b;
   --yinn-border: #DBDADE;
-
   --yinn-brand-from: #1e3a8a;
   --yinn-brand-to: #3b82f6;
-
-  --yinn-soft: 0 10px 30px rgba(15, 23, 42, .08);
+  --yinn-soft: 0 10px 30px rgba(15, 23, 42, 0.08);
 }
 
-html[data-theme="dark"]{
+html[data-theme="dark"] {
   --yinn-bg: #0b1220;
   --yinn-surface: #0f172a;
   --yinn-text: #e2e8f0;
   --yinn-muted: #94a3b8;
   --yinn-border: #1f2937;
-
-  --yinn-soft: 0 10px 30px rgba(0,0,0,.35);
+  --yinn-soft: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
-/* Animasi floating (mirip move-up/move-down) */
+/* Floating anim */
 @keyframes yinn-float-up {
   from { transform: translateY(6px); }
-  to   { transform: translateY(-6px); }
+  to { transform: translateY(-6px); }
 }
 @keyframes yinn-float-down {
   from { transform: translateY(-6px); }
-  to   { transform: translateY(6px); }
+  to { transform: translateY(6px); }
 }
-
 .yinn-float-up { animation: yinn-float-up 2.2s ease-in-out infinite alternate; }
 .yinn-float-down { animation: yinn-float-down 2.2s ease-in-out infinite alternate; }

@@ -11,10 +11,10 @@ import {
   Clock,
   Headset,
   Mail,
+  Send,
   ShieldCheck,
   Smartphone,
   Sparkles,
-  Telegram,
 } from "lucide-react";
 import ThemeMenu from "./components/ThemeMenu";
 
@@ -24,14 +24,19 @@ function Brand() {
       <div
         className="h-10 w-10 rounded-2xl grid place-items-center text-white shadow-[var(--yinn-soft)]"
         style={{
-          backgroundImage: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+          backgroundImage:
+            "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
         }}
       >
         <Sparkles size={18} />
       </div>
       <div className="leading-tight">
-        <div className="font-extrabold text-[var(--yinn-text)] tracking-tight">YinnOTP</div>
-        <div className="text-xs text-[var(--yinn-muted)] -mt-0.5">Virtual Number & OTP API</div>
+        <div className="font-extrabold text-[var(--yinn-text)] tracking-tight">
+          YinnOTP
+        </div>
+        <div className="text-xs text-[var(--yinn-muted)] -mt-0.5">
+          Virtual Number & OTP API
+        </div>
       </div>
     </div>
   );
@@ -45,7 +50,10 @@ function PrimaryButton({ children, className = "", ...props }) {
         "shadow-[var(--yinn-soft)] transition active:scale-[.99] " +
         className
       }
-      style={{ backgroundImage: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
+      style={{
+        backgroundImage:
+          "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+      }}
       {...props}
     >
       {children}
@@ -74,7 +82,10 @@ function SectionTitle({ badge, title, desc }) {
     <div className="text-center">
       {badge ? (
         <div className="inline-flex items-center gap-2 rounded-full border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-3 py-1 text-xs font-semibold text-[var(--yinn-muted)] shadow-[var(--yinn-soft)]">
-          <span className="h-2 w-2 rounded-full" style={{ background: "var(--yinn-brand-to)" }} />
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ background: "var(--yinn-brand-to)" }}
+          />
           {badge}
         </div>
       ) : null}
@@ -82,7 +93,9 @@ function SectionTitle({ badge, title, desc }) {
         {title}
       </h2>
       {desc ? (
-        <p className="mt-2 text-sm sm:text-base text-[var(--yinn-muted)] max-w-2xl mx-auto">{desc}</p>
+        <p className="mt-2 text-sm sm:text-base text-[var(--yinn-muted)] max-w-2xl mx-auto">
+          {desc}
+        </p>
       ) : null}
     </div>
   );
@@ -101,16 +114,16 @@ function FAQItem({ q, a, defaultOpen = false }) {
         <div className="text-[var(--yinn-muted)]">{open ? "—" : "+"}</div>
       </button>
       {open ? (
-        <div className="px-4 pb-4 text-sm text-[var(--yinn-muted)] leading-relaxed">{a}</div>
+        <div className="px-4 pb-4 text-sm text-[var(--yinn-muted)] leading-relaxed">
+          {a}
+        </div>
       ) : null}
     </div>
   );
 }
 
 export default function Home() {
-  // Optional: kalau user sebelumnya pake data-theme dari localStorage lama, tetep aman
   useEffect(() => {
-    // kalau belum ada, set default light (ThemeMenu akan handle preferensi juga)
     if (!document.documentElement.getAttribute("data-theme")) {
       document.documentElement.setAttribute("data-theme", "light");
     }
@@ -118,16 +131,39 @@ export default function Home() {
 
   const reviews = useMemo(
     () => [
-      { name: "VreXenAi", role: "Owner", text: "Murah, cepat, dan UI-nya enak dipakai. OTP masuk cepet." },
-      { name: "Sigma", role: "User", text: "API stabil. Semoga endpoint makin banyak biar makin lengkap." },
-      { name: "Lynne Bot", role: "Developer", text: "Deliver rate mantap, nomor fresh. Cocok buat automation." },
-      { name: "Rafk", role: "User", text: "Stock kadang cepet habis, tapi overall worth it." },
-      { name: "DikzzModz", role: "Reseller", text: "Kualitas oke. Kalau ada promo paket bakal makin gacor." },
+      {
+        name: "VreXenAi",
+        role: "Owner",
+        text: "Murah, cepat, dan UI-nya enak dipakai. OTP masuk cepet.",
+      },
+      {
+        name: "Sigma",
+        role: "User",
+        text: "API stabil. Semoga endpoint makin banyak biar makin lengkap.",
+      },
+      {
+        name: "Lynne Bot",
+        role: "Developer",
+        text: "Deliver rate mantap, nomor fresh. Cocok buat automation.",
+      },
+      {
+        name: "Rafk",
+        role: "User",
+        text: "Stock kadang cepet habis, tapi overall worth it.",
+      },
+      {
+        name: "DikzzModz",
+        role: "Reseller",
+        text: "Kualitas oke. Kalau ada promo paket bakal makin gacor.",
+      },
     ],
     []
   );
 
-  const logoList = useMemo(() => ["DANA", "ShopeePay", "OVO", "GoPay", "LinkAja", "PayPal"], []);
+  const logoList = useMemo(
+    () => ["DANA", "ShopeePay", "OVO", "GoPay", "LinkAja", "PayPal"],
+    []
+  );
 
   const reviewsRef = useRef(null);
   const scrollReviews = (dir) => {
@@ -186,8 +222,8 @@ export default function Home() {
                 Murah & Berkualitas
               </h1>
               <p className="mt-3 text-[var(--yinn-muted)] text-sm sm:text-base max-w-xl">
-                YinnOTP menyediakan nomor virtual untuk ribuan aplikasi + REST API untuk integrasi OTP.
-                Fokus ke speed, stability, dan deliver rate.
+                YinnOTP menyediakan nomor virtual untuk ribuan aplikasi + REST API
+                untuk integrasi OTP. Fokus ke speed, stability, dan deliver rate.
               </p>
 
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
@@ -214,17 +250,17 @@ export default function Home() {
                     className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3 text-center shadow-[var(--yinn-soft)]"
                   >
                     <div className="text-lg font-extrabold">{x.k}</div>
-                    <div className="text-xs text-[var(--yinn-muted)]">{x.v}</div>
+                    <div className="text-xs text-[var(--yinn-muted)]">
+                      {x.v}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Mock “dashboard image” (biar mirip template hero-dashboard) */}
+            {/* Mock dashboard preview */}
             <div className="relative">
-              <div
-                className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] overflow-hidden"
-              >
+              <div className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] overflow-hidden">
                 <div
                   className="h-12 px-4 flex items-center justify-between border-b border-[var(--yinn-border)]"
                   style={{ background: "rgba(59,130,246,.06)" }}
@@ -236,12 +272,18 @@ export default function Home() {
                 <div className="p-4 grid gap-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="rounded-2xl border border-[var(--yinn-border)] p-4 yinn-float-down">
-                      <div className="text-xs text-[var(--yinn-muted)]">Saldo</div>
+                      <div className="text-xs text-[var(--yinn-muted)]">
+                        Saldo
+                      </div>
                       <div className="text-xl font-extrabold">Rp 0</div>
                     </div>
                     <div className="rounded-2xl border border-[var(--yinn-border)] p-4 yinn-float-up">
-                      <div className="text-xs text-[var(--yinn-muted)]">Status</div>
-                      <div className="text-xl font-extrabold text-emerald-500">Online</div>
+                      <div className="text-xs text-[var(--yinn-muted)]">
+                        Status
+                      </div>
+                      <div className="text-xl font-extrabold text-emerald-500">
+                        Online
+                      </div>
                     </div>
                   </div>
                   <div className="rounded-2xl border border-[var(--yinn-border)] p-4">
@@ -249,17 +291,25 @@ export default function Home() {
                     <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
                       <div
                         className="h-full w-[62%]"
-                        style={{ backgroundImage: "linear-gradient(90deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
+                        style={{
+                          backgroundImage:
+                            "linear-gradient(90deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                        }}
                       />
                     </div>
-                    <div className="mt-2 text-xs text-[var(--yinn-muted)]">Ready untuk alur countries → operators → orders</div>
+                    <div className="mt-2 text-xs text-[var(--yinn-muted)]">
+                      Ready untuk alur countries → operators → orders
+                    </div>
                   </div>
                 </div>
               </div>
 
               <div
                 className="absolute -bottom-6 -left-6 hidden sm:block w-28 h-28 rounded-3xl opacity-40"
-                style={{ backgroundImage: "linear-gradient(135deg, var(--yinn-brand-to), transparent)" }}
+                style={{
+                  backgroundImage:
+                    "linear-gradient(135deg, var(--yinn-brand-to), transparent)",
+                }}
               />
             </div>
           </div>
@@ -277,12 +327,36 @@ export default function Home() {
 
           <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
-              { icon: Smartphone, title: "1700+ Layanan Aplikasi", desc: "Support ribuan aplikasi dengan flow yang rapi." },
-              { icon: Sparkles, title: "Pembaruan Berkala", desc: "Fitur & sistem terus ditingkatkan secara rutin." },
-              { icon: Bolt, title: "Fast Receive", desc: "Penerimaan SMS instan, minim delay." },
-              { icon: ShieldCheck, title: "Terpercaya", desc: "Komitmen jaga kualitas layanan & kepercayaan user." },
-              { icon: Headset, title: "Dukungan Prima", desc: "Support responsif untuk bantu kendala user." },
-              { icon: BadgeCheck, title: "Dokumentasi & API", desc: "Siap untuk integrasi automation & developer." },
+              {
+                icon: Smartphone,
+                title: "1700+ Layanan Aplikasi",
+                desc: "Support ribuan aplikasi dengan flow yang rapi.",
+              },
+              {
+                icon: Sparkles,
+                title: "Pembaruan Berkala",
+                desc: "Fitur & sistem terus ditingkatkan secara rutin.",
+              },
+              {
+                icon: Bolt,
+                title: "Fast Receive",
+                desc: "Penerimaan SMS instan, minim delay.",
+              },
+              {
+                icon: ShieldCheck,
+                title: "Terpercaya",
+                desc: "Komitmen jaga kualitas layanan & kepercayaan user.",
+              },
+              {
+                icon: Headset,
+                title: "Dukungan Prima",
+                desc: "Support responsif untuk bantu kendala user.",
+              },
+              {
+                icon: BadgeCheck,
+                title: "Dokumentasi & API",
+                desc: "Siap untuk integrasi automation & developer.",
+              },
             ].map(({ icon: Icon, title, desc }) => (
               <div
                 key={title}
@@ -291,13 +365,18 @@ export default function Home() {
                 <div
                   className="h-12 w-12 rounded-2xl grid place-items-center text-white"
                   style={{
-                    backgroundImage: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                    backgroundImage:
+                      "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
                   }}
                 >
                   <Icon size={20} />
                 </div>
-                <h3 className="mt-4 font-extrabold text-[var(--yinn-text)]">{title}</h3>
-                <p className="mt-2 text-sm text-[var(--yinn-muted)] leading-relaxed">{desc}</p>
+                <h3 className="mt-4 font-extrabold text-[var(--yinn-text)]">
+                  {title}
+                </h3>
+                <p className="mt-2 text-sm text-[var(--yinn-muted)] leading-relaxed">
+                  {desc}
+                </p>
               </div>
             ))}
           </div>
@@ -309,7 +388,11 @@ export default function Home() {
         <div className="max-w-6xl mx-auto px-4">
           <div className="grid lg:grid-cols-[320px,1fr] gap-6 items-start">
             <div>
-              <SectionTitle badge="Real Customers Reviews" title="Apa kata mereka?" desc="Rating pengguna yang mencoba layanan kami." />
+              <SectionTitle
+                badge="Real Customers Reviews"
+                title="Apa kata mereka?"
+                desc="Rating pengguna yang mencoba layanan kami."
+              />
               <div className="mt-5 flex gap-2">
                 <button
                   onClick={() => scrollReviews(-1)}
@@ -341,7 +424,9 @@ export default function Home() {
                     <div className="font-extrabold">{r.name}</div>
                     <div className="text-xs text-[var(--yinn-muted)]">{r.role}</div>
                   </div>
-                  <p className="mt-3 text-sm text-[var(--yinn-muted)] leading-relaxed">{r.text}</p>
+                  <p className="mt-3 text-sm text-[var(--yinn-muted)] leading-relaxed">
+                    {r.text}
+                  </p>
                   <div className="mt-4 text-sm">★★★★★</div>
                 </div>
               ))}
@@ -383,14 +468,18 @@ export default function Home() {
                 key={x.n}
                 className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] p-5 text-center"
               >
-                <div className="mx-auto h-14 w-14 rounded-full grid place-items-center text-white font-extrabold"
-                     style={{ backgroundImage: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}>
+                <div
+                  className="mx-auto h-14 w-14 rounded-full grid place-items-center text-white font-extrabold"
+                  style={{
+                    backgroundImage:
+                      "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                  }}
+                >
                   {x.n}
                 </div>
                 <h3 className="mt-4 font-extrabold">{x.t}</h3>
                 <p className="mt-2 text-sm text-[var(--yinn-muted)]">{x.d}</p>
 
-                {/* Placeholder gambar step (kalau nanti mau tambahin image di /public) */}
                 <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] p-4 text-xs text-[var(--yinn-muted)]">
                   (Preview step {x.n})
                 </div>
@@ -403,25 +492,34 @@ export default function Home() {
       {/* FAQ */}
       <section className="py-14 sm:py-20 border-t border-[var(--yinn-border)]">
         <div className="max-w-6xl mx-auto px-4">
-          <SectionTitle badge="FAQ" title="Frequently asked questions" desc="Beberapa pertanyaan yang sering ditanyakan." />
+          <SectionTitle
+            badge="FAQ"
+            title="Frequently asked questions"
+            desc="Beberapa pertanyaan yang sering ditanyakan."
+          />
 
           <div className="mt-10 grid lg:grid-cols-2 gap-6 items-start">
             <div className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] p-6">
               <div className="flex items-center gap-3">
                 <div
                   className="h-10 w-10 rounded-2xl grid place-items-center text-white"
-                  style={{ backgroundImage: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
+                  style={{
+                    backgroundImage:
+                      "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                  }}
                 >
                   <Clock size={18} />
                 </div>
                 <div>
                   <div className="font-extrabold">Support & Info</div>
-                  <div className="text-sm text-[var(--yinn-muted)]">Jawaban ringkas biar gak ribet.</div>
+                  <div className="text-sm text-[var(--yinn-muted)]">
+                    Jawaban ringkas biar gak ribet.
+                  </div>
                 </div>
               </div>
               <div className="mt-4 text-sm text-[var(--yinn-muted)] leading-relaxed">
-                Kalau ada kendala (saldo, OTP, order), langsung hubungi admin/support. Nanti kita rapihin juga halaman
-                contact biar nyambung ke channel lo.
+                Kalau ada kendala (saldo, OTP, order), langsung hubungi admin/support.
+                Nanti kita rapihin juga halaman contact biar nyambung ke channel lo.
               </div>
             </div>
 
@@ -455,12 +553,12 @@ export default function Home() {
       {/* CTA */}
       <section className="py-14 sm:py-20">
         <div className="max-w-6xl mx-auto px-4">
-          <div
-            className="rounded-[28px] border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] overflow-hidden"
-          >
+          <div className="rounded-[28px] border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] overflow-hidden">
             <div className="grid lg:grid-cols-2 gap-0">
               <div className="p-7 sm:p-10">
-                <div className="text-sm font-semibold text-[var(--yinn-muted)]">Get Started</div>
+                <div className="text-sm font-semibold text-[var(--yinn-muted)]">
+                  Get Started
+                </div>
                 <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold">
                   Siap dapat layanan?
                 </h3>
@@ -492,9 +590,15 @@ export default function Home() {
                 <div className="relative rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-bg)] p-6">
                   <div className="font-extrabold">Kenapa YinnOTP?</div>
                   <ul className="mt-3 grid gap-2 text-sm text-[var(--yinn-muted)]">
-                    <li className="flex gap-2"><span>•</span> UI rapi & ringan</li>
-                    <li className="flex gap-2"><span>•</span> Flow order jelas</li>
-                    <li className="flex gap-2"><span>•</span> Siap untuk API integration</li>
+                    <li className="flex gap-2">
+                      <span>•</span> UI rapi & ringan
+                    </li>
+                    <li className="flex gap-2">
+                      <span>•</span> Flow order jelas
+                    </li>
+                    <li className="flex gap-2">
+                      <span>•</span> Siap untuk API integration
+                    </li>
                   </ul>
                 </div>
               </div>
@@ -506,7 +610,11 @@ export default function Home() {
       {/* Contact */}
       <section className="py-14 sm:py-20 border-t border-[var(--yinn-border)]">
         <div className="max-w-6xl mx-auto px-4">
-          <SectionTitle badge="Contact Us" title="Let’s work together" desc="Punya pertanyaan atau aduan? Hubungi kami." />
+          <SectionTitle
+            badge="Contact Us"
+            title="Let’s work together"
+            desc="Punya pertanyaan atau aduan? Hubungi kami."
+          />
 
           <div className="mt-10 grid lg:grid-cols-2 gap-6">
             <div className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] p-6">
@@ -519,22 +627,31 @@ export default function Home() {
                 <div className="rounded-2xl border border-[var(--yinn-border)] p-4 flex items-center gap-3">
                   <div
                     className="h-10 w-10 rounded-2xl grid place-items-center text-white"
-                    style={{ backgroundImage: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
+                    style={{
+                      backgroundImage:
+                        "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                    }}
                   >
                     <Mail size={18} />
                   </div>
                   <div>
                     <div className="text-sm font-semibold">Email</div>
-                    <div className="text-sm text-[var(--yinn-muted)]">support@yinnotp.com</div>
+                    <div className="text-sm text-[var(--yinn-muted)]">
+                      support@yinnotp.com
+                    </div>
                   </div>
                 </div>
 
                 <div className="rounded-2xl border border-[var(--yinn-border)] p-4 flex items-center gap-3">
                   <div
                     className="h-10 w-10 rounded-2xl grid place-items-center text-white"
-                    style={{ backgroundImage: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
+                    style={{
+                      backgroundImage:
+                        "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                    }}
                   >
-                    <Telegram size={18} />
+                    {/* FIX: Lucide gak punya icon Telegram, jadi pake Send */}
+                    <Send size={18} />
                   </div>
                   <div>
                     <div className="text-sm font-semibold">Telegram</div>
@@ -593,16 +710,24 @@ export default function Home() {
             <div>
               <div className="font-extrabold">Company</div>
               <div className="mt-3 grid gap-2 text-sm text-[var(--yinn-muted)]">
-                <Link href="/privacy" className="hover:underline">Privacy Policy</Link>
-                <Link href="/terms" className="hover:underline">Terms & Conditions</Link>
+                <Link href="/privacy" className="hover:underline">
+                  Privacy Policy
+                </Link>
+                <Link href="/terms" className="hover:underline">
+                  Terms & Conditions
+                </Link>
               </div>
             </div>
 
             <div>
               <div className="font-extrabold">Docs</div>
               <div className="mt-3 grid gap-2 text-sm text-[var(--yinn-muted)]">
-                <Link href="/register" className="hover:underline">Get Started</Link>
-                <Link href="/order" className="hover:underline">Order (dev)</Link>
+                <Link href="/register" className="hover:underline">
+                  Get Started
+                </Link>
+                <Link href="/order" className="hover:underline">
+                  Order (dev)
+                </Link>
               </div>
             </div>
 

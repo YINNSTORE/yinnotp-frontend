@@ -11,10 +11,10 @@ import {
   Clock,
   Headset,
   Mail,
-  Send,
   ShieldCheck,
   Smartphone,
   Sparkles,
+  Send,
 } from "lucide-react";
 import ThemeMenu from "./components/ThemeMenu";
 
@@ -22,7 +22,7 @@ function Brand() {
   return (
     <div className="flex items-center gap-3">
       <div
-        className="h-10 w-10 rounded-2xl grid place-items-center text-white shadow-[var(--yinn-soft)]"
+        className="h-10 w-10 rounded-2xl shadow-[var(--yinn-soft)] grid place-items-center"
         style={{
           backgroundImage:
             "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
@@ -46,8 +46,7 @@ function PrimaryButton({ children, className = "", ...props }) {
   return (
     <button
       className={
-        "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 font-semibold text-white " +
-        "shadow-[var(--yinn-soft)] transition active:scale-[.99] " +
+        "inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 font-semibold text-white shadow-[var(--yinn-soft)] transition hover:opacity-95 " +
         className
       }
       style={{
@@ -65,9 +64,7 @@ function OutlineButton({ children, className = "", ...props }) {
   return (
     <button
       className={
-        "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 font-semibold " +
-        "border border-[var(--yinn-border)] bg-[var(--yinn-surface)] text-[var(--yinn-text)] " +
-        "shadow-[var(--yinn-soft)] transition active:scale-[.99] " +
+        "inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 font-semibold border border-[var(--yinn-border)] bg-[var(--yinn-surface)] text-[var(--yinn-text)] transition hover:bg-black/5 dark:hover:bg-white/5 " +
         className
       }
       {...props}
@@ -79,23 +76,17 @@ function OutlineButton({ children, className = "", ...props }) {
 
 function SectionTitle({ badge, title, desc }) {
   return (
-    <div className="text-center">
+    <div className="text-center max-w-2xl mx-auto">
       {badge ? (
-        <div className="inline-flex items-center gap-2 rounded-full border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-3 py-1 text-xs font-semibold text-[var(--yinn-muted)] shadow-[var(--yinn-soft)]">
-          <span
-            className="h-2 w-2 rounded-full"
-            style={{ background: "var(--yinn-brand-to)" }}
-          />
+        <div className="inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold bg-black/5 dark:bg-white/10 text-[var(--yinn-text)] border border-[var(--yinn-border)]">
           {badge}
         </div>
       ) : null}
-      <h2 className="mt-3 text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--yinn-text)]">
+      <h2 className="mt-4 text-3xl sm:text-4xl font-extrabold tracking-tight text-[var(--yinn-text)]">
         {title}
       </h2>
       {desc ? (
-        <p className="mt-2 text-sm sm:text-base text-[var(--yinn-muted)] max-w-2xl mx-auto">
-          {desc}
-        </p>
+        <p className="mt-3 text-[var(--yinn-muted)] leading-relaxed">{desc}</p>
       ) : null}
     </div>
   );
@@ -104,17 +95,19 @@ function SectionTitle({ badge, title, desc }) {
 function FAQItem({ q, a, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] overflow-hidden">
+    <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] overflow-hidden">
       <button
-        className="w-full flex items-center justify-between gap-4 px-4 py-4 text-left"
         onClick={() => setOpen((v) => !v)}
         type="button"
+        className="w-full px-5 py-4 flex items-center justify-between text-left"
       >
-        <div className="font-semibold text-[var(--yinn-text)]">{q}</div>
-        <div className="text-[var(--yinn-muted)]">{open ? "—" : "+"}</div>
+        <span className="font-semibold text-[var(--yinn-text)]">{q}</span>
+        <span className="text-[var(--yinn-muted)] font-bold">
+          {open ? "—" : "+"}
+        </span>
       </button>
       {open ? (
-        <div className="px-4 pb-4 text-sm text-[var(--yinn-muted)] leading-relaxed">
+        <div className="px-5 pb-5 text-[var(--yinn-muted)] leading-relaxed">
           {a}
         </div>
       ) : null}
@@ -123,7 +116,9 @@ function FAQItem({ q, a, defaultOpen = false }) {
 }
 
 export default function Home() {
+  // Optional: kalau user sebelumnya pake data-theme dari localStorage lama, tetep aman
   useEffect(() => {
+    // kalau belum ada, set default light (ThemeMenu akan handle preferensi juga)
     if (!document.documentElement.getAttribute("data-theme")) {
       document.documentElement.setAttribute("data-theme", "light");
     }
@@ -146,11 +141,7 @@ export default function Home() {
         role: "Developer",
         text: "Deliver rate mantap, nomor fresh. Cocok buat automation.",
       },
-      {
-        name: "Rafk",
-        role: "User",
-        text: "Stock kadang cepet habis, tapi overall worth it.",
-      },
+      { name: "Rafk", role: "User", text: "Stock kadang cepet habis, tapi overall worth it." },
       {
         name: "DikzzModz",
         role: "Reseller",
@@ -174,193 +165,221 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
+    <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
       {/* Navbar */}
-      <header className="sticky top-0 z-40 backdrop-blur bg-[var(--yinn-bg)]/80 border-b border-[var(--yinn-border)]">
-        <div className="max-w-6xl mx-auto px-4">
-          <div className="h-16 flex items-center justify-between gap-3">
-            <Link href="/" className="no-underline">
-              <Brand />
+      <nav className="sticky top-0 z-50 backdrop-blur bg-[var(--yinn-bg)]/80 border-b border-[var(--yinn-border)]">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-4 flex items-center justify-between">
+          <Brand />
+          <div className="flex items-center gap-3">
+            <ThemeMenu />
+            <Link
+              href="/register"
+              className="hidden sm:inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 font-semibold text-white shadow-[var(--yinn-soft)]"
+              style={{
+                backgroundImage:
+                  "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+              }}
+            >
+              Login/Register <ArrowRight size={18} />
             </Link>
-
-            <div className="flex items-center gap-2">
-              <ThemeMenu />
-              <Link href="/login" className="hidden sm:block">
-                <PrimaryButton className="px-4 py-2">
-                  Login/Register <ArrowRight size={16} />
-                </PrimaryButton>
-              </Link>
-              <Link href="/login" className="sm:hidden">
-                <PrimaryButton className="px-3 py-2">
-                  <ArrowRight size={16} />
-                </PrimaryButton>
-              </Link>
-            </div>
+            <Link
+              href="/register"
+              className="sm:hidden inline-flex items-center justify-center rounded-2xl px-4 py-2 font-semibold text-white shadow-[var(--yinn-soft)]"
+              style={{
+                backgroundImage:
+                  "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+              }}
+            >
+              Masuk
+            </Link>
           </div>
         </div>
-      </header>
+      </nav>
 
       {/* Hero */}
-      <section className="relative overflow-hidden">
-        <div
-          className="absolute inset-0 opacity-[0.12]"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle at 20% 20%, var(--yinn-brand-to) 0, transparent 40%), radial-gradient(circle at 80% 10%, var(--yinn-brand-from) 0, transparent 35%)",
-          }}
-        />
-        <div className="max-w-6xl mx-auto px-4 pt-10 pb-14 sm:pt-16 sm:pb-20 relative">
+      <header className="relative overflow-hidden">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-14 sm:py-20">
           <div className="grid lg:grid-cols-2 gap-10 items-center">
             <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-3 py-1 text-xs font-semibold text-[var(--yinn-muted)] shadow-[var(--yinn-soft)]">
-                <Bolt size={14} />
+              <div className="inline-flex items-center gap-2 rounded-full px-4 py-2 bg-[var(--yinn-surface)] border border-[var(--yinn-border)] shadow-[var(--yinn-soft)] text-sm font-semibold">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-status" />
                 Fast receive • nomor fresh • API ready
               </div>
 
-              <h1 className="mt-4 text-3xl sm:text-5xl font-extrabold tracking-tight">
+              <h1 className="mt-6 text-4xl sm:text-5xl font-extrabold tracking-tight">
                 Virtual Number <br className="hidden sm:block" />
-                Murah & Berkualitas
+                <span
+                  className="text-transparent bg-clip-text"
+                  style={{
+                    backgroundImage:
+                      "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                  }}
+                >
+                  Murah & Berkualitas
+                </span>
               </h1>
-              <p className="mt-3 text-[var(--yinn-muted)] text-sm sm:text-base max-w-xl">
-                YinnOTP menyediakan nomor virtual untuk ribuan aplikasi + REST API
-                untuk integrasi OTP. Fokus ke speed, stability, dan deliver rate.
+
+              <p className="mt-4 text-[var(--yinn-muted)] leading-relaxed text-lg">
+                Nomor virtual premium berbagai negara + REST API untuk verifikasi OTP
+                aplikasi. Cocok buat developer, reseller, dan kebutuhan automation.
               </p>
 
-              <div className="mt-6 flex flex-col sm:flex-row gap-3">
-                <Link href="/login">
-                  <PrimaryButton>
+              <div className="mt-8 flex flex-col sm:flex-row gap-3">
+                <Link href="/register">
+                  <PrimaryButton className="w-full sm:w-auto">
                     Login/Register <ArrowRight size={18} />
                   </PrimaryButton>
                 </Link>
                 <a href="#features">
-                  <OutlineButton>
-                    Lihat Fitur <Sparkles size={18} />
+                  <OutlineButton className="w-full sm:w-auto">
+                    Lihat fitur <Bolt size={18} />
                   </OutlineButton>
                 </a>
               </div>
 
-              <div className="mt-6 grid grid-cols-3 gap-3 max-w-md">
+              <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
                   { k: "85+", v: "Negara" },
                   { k: "1700+", v: "Aplikasi" },
-                  { k: "99%", v: "Deliver" },
+                  { k: "99%", v: "Deliver rate" },
+                  { k: "24/7", v: "Support" },
                 ].map((x) => (
                   <div
                     key={x.v}
-                    className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3 text-center shadow-[var(--yinn-soft)]"
+                    className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-3 shadow-[var(--yinn-soft)]"
                   >
-                    <div className="text-lg font-extrabold">{x.k}</div>
-                    <div className="text-xs text-[var(--yinn-muted)]">
-                      {x.v}
-                    </div>
+                    <div className="text-xl font-extrabold">{x.k}</div>
+                    <div className="text-sm text-[var(--yinn-muted)]">{x.v}</div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Mock dashboard preview */}
             <div className="relative">
-              <div className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] overflow-hidden">
-                <div
-                  className="h-12 px-4 flex items-center justify-between border-b border-[var(--yinn-border)]"
-                  style={{ background: "rgba(59,130,246,.06)" }}
-                >
-                  <div className="font-semibold">YinnOTP Dashboard</div>
-                  <div className="text-xs text-[var(--yinn-muted)]">Preview</div>
-                </div>
-
-                <div className="p-4 grid gap-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-2xl border border-[var(--yinn-border)] p-4 yinn-float-down">
-                      <div className="text-xs text-[var(--yinn-muted)]">
-                        Saldo
-                      </div>
-                      <div className="text-xl font-extrabold">Rp 0</div>
+              <div
+                className="absolute -top-8 -left-8 h-40 w-40 rounded-full blur-3xl opacity-40"
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                }}
+              />
+              <div className="relative rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] overflow-hidden">
+                <div className="p-6 sm:p-8">
+                  <div className="flex items-center justify-between">
+                    <div className="font-extrabold">Dashboard Preview</div>
+                    <div className="text-sm text-[var(--yinn-muted)] flex items-center gap-2">
+                      <Clock size={16} /> realtime
                     </div>
-                    <div className="rounded-2xl border border-[var(--yinn-border)] p-4 yinn-float-up">
-                      <div className="text-xs text-[var(--yinn-muted)]">
-                        Status
+                  </div>
+
+                  <div className="mt-6 grid gap-4">
+                    <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-bg)] p-4 yinn-float-down">
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold">Order OTP</div>
+                        <span className="text-xs px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 font-semibold">
+                          Ready
+                        </span>
                       </div>
-                      <div className="text-xl font-extrabold text-emerald-500">
-                        Online
+                      <div className="mt-2 text-sm text-[var(--yinn-muted)]">
+                        Pilih negara & aplikasi, nomor muncul instan.
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-bg)] p-4 yinn-float-up">
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold">REST API</div>
+                        <span className="text-xs px-2 py-1 rounded-full bg-blue-500/10 text-blue-600 font-semibold">
+                          v1
+                        </span>
+                      </div>
+                      <div className="mt-2 text-sm text-[var(--yinn-muted)]">
+                        Integrasi cepat untuk bot & automation.
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-bg)] p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold">Saldo & Billing</div>
+                        <span className="text-xs px-2 py-1 rounded-full bg-purple-500/10 text-purple-600 font-semibold">
+                          Aman
+                        </span>
+                      </div>
+                      <div className="mt-2 text-sm text-[var(--yinn-muted)]">
+                        Riwayat transaksi & topup rapi.
                       </div>
                     </div>
                   </div>
-                  <div className="rounded-2xl border border-[var(--yinn-border)] p-4">
-                    <div className="text-xs text-[var(--yinn-muted)]">Order</div>
-                    <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
-                      <div
-                        className="h-full w-[62%]"
-                        style={{
-                          backgroundImage:
-                            "linear-gradient(90deg, var(--yinn-brand-from), var(--yinn-brand-to))",
-                        }}
-                      />
-                    </div>
-                    <div className="mt-2 text-xs text-[var(--yinn-muted)]">
-                      Ready untuk alur countries → operators → orders
-                    </div>
+
+                  <div className="mt-6 flex gap-3">
+                    <Link href="/dashboard" className="flex-1">
+                      <PrimaryButton className="w-full">Get Started</PrimaryButton>
+                    </Link>
+                    <Link href="/developer/api" className="flex-1">
+                      <OutlineButton className="w-full">
+                        Docs API <ArrowRight size={18} />
+                      </OutlineButton>
+                    </Link>
                   </div>
                 </div>
               </div>
 
               <div
-                className="absolute -bottom-6 -left-6 hidden sm:block w-28 h-28 rounded-3xl opacity-40"
+                className="absolute -bottom-10 -right-10 h-44 w-44 rounded-full blur-3xl opacity-30"
                 style={{
-                  backgroundImage:
-                    "linear-gradient(135deg, var(--yinn-brand-to), transparent)",
+                  background:
+                    "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
                 }}
               />
             </div>
           </div>
         </div>
-      </section>
+      </header>
 
       {/* Features */}
-      <section id="features" className="py-14 sm:py-20">
-        <div className="max-w-6xl mx-auto px-4">
+      <section id="features" className="py-16 sm:py-20">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <SectionTitle
             badge="Fitur Unggulan"
             title="YinnOTP Fitur Utama"
             desc="Informasi lengkap mengenai layanan yang kami sediakan untuk kebutuhan Anda."
           />
 
-          <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {[
               {
-                icon: Smartphone,
                 title: "1700+ Layanan Aplikasi",
-                desc: "Support ribuan aplikasi dengan flow yang rapi.",
+                desc: "Tersedia layanan OTP ribuan aplikasi dengan harga murah dan kualitas terbaik.",
+                Icon: Smartphone,
               },
               {
-                icon: Sparkles,
                 title: "Pembaruan Berkala",
-                desc: "Fitur & sistem terus ditingkatkan secara rutin.",
+                desc: "Sistem dan API terus diperbarui agar makin stabil dan kaya fitur.",
+                Icon: Bolt,
               },
               {
-                icon: Bolt,
                 title: "Fast Receive",
-                desc: "Penerimaan SMS instan, minim delay.",
+                desc: "Penerimaan SMS instan tanpa delay, cocok buat verifikasi cepat.",
+                Icon: Clock,
               },
               {
-                icon: ShieldCheck,
                 title: "Terpercaya",
-                desc: "Komitmen jaga kualitas layanan & kepercayaan user.",
+                desc: "Kualitas nomor dijaga, nomor fresh, opsi cancel tersedia.",
+                Icon: BadgeCheck,
               },
               {
-                icon: Headset,
                 title: "Dukungan Prima",
-                desc: "Support responsif untuk bantu kendala user.",
+                desc: "Support siap bantu 24/7 untuk kendala akun, topup, dan penggunaan API.",
+                Icon: Headset,
               },
               {
-                icon: BadgeCheck,
-                title: "Dokumentasi & API",
-                desc: "Siap untuk integrasi automation & developer.",
+                title: "Dokumentasi Lengkap",
+                desc: "Dokumentasi API jelas dan gampang diintegrasikan ke project kamu.",
+                Icon: ShieldCheck,
               },
-            ].map(({ icon: Icon, title, desc }) => (
+            ].map(({ title, desc, Icon }) => (
               <div
                 key={title}
-                className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-5 shadow-[var(--yinn-soft)]"
+                className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-6 shadow-[var(--yinn-soft)]"
               >
                 <div
                   className="h-12 w-12 rounded-2xl grid place-items-center text-white"
@@ -369,12 +388,10 @@ export default function Home() {
                       "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
                   }}
                 >
-                  <Icon size={20} />
+                  <Icon size={22} />
                 </div>
-                <h3 className="mt-4 font-extrabold text-[var(--yinn-text)]">
-                  {title}
-                </h3>
-                <p className="mt-2 text-sm text-[var(--yinn-muted)] leading-relaxed">
+                <h3 className="mt-4 font-extrabold text-lg">{title}</h3>
+                <p className="mt-2 text-[var(--yinn-muted)] leading-relaxed">
                   {desc}
                 </p>
               </div>
@@ -383,106 +400,102 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Reviews + Logos */}
-      <section className="py-14 sm:py-20 border-t border-[var(--yinn-border)]">
-        <div className="max-w-6xl mx-auto px-4">
-          <div className="grid lg:grid-cols-[320px,1fr] gap-6 items-start">
+      {/* Reviews */}
+      <section id="reviews" className="py-16 sm:py-20 border-t border-[var(--yinn-border)] bg-[var(--yinn-bg)]">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
             <div>
-              <SectionTitle
-                badge="Real Customers Reviews"
-                title="Apa kata mereka?"
-                desc="Rating pengguna yang mencoba layanan kami."
-              />
-              <div className="mt-5 flex gap-2">
-                <button
-                  onClick={() => scrollReviews(-1)}
-                  className="h-11 w-11 rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] grid place-items-center"
-                  type="button"
-                >
-                  <ChevronLeft size={18} />
-                </button>
-                <button
-                  onClick={() => scrollReviews(1)}
-                  className="h-11 w-11 rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] grid place-items-center"
-                  type="button"
-                >
-                  <ChevronRight size={18} />
-                </button>
+              <div className="inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold bg-black/5 dark:bg-white/10 border border-[var(--yinn-border)]">
+                Real Customers Reviews
               </div>
+              <h2 className="mt-4 text-3xl sm:text-4xl font-extrabold tracking-tight">
+                Apa kata mereka?
+              </h2>
+              <p className="mt-2 text-[var(--yinn-muted)]">
+                Rating pengguna yang mencoba layanan kami
+              </p>
             </div>
 
-            <div
-              ref={reviewsRef}
-              className="flex gap-4 overflow-x-auto scroll-smooth snap-x snap-mandatory pb-2"
-            >
-              {reviews.map((r) => (
-                <div
-                  key={r.name}
-                  className="min-w-[280px] sm:min-w-[340px] snap-start rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-5 shadow-[var(--yinn-soft)]"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="font-extrabold">{r.name}</div>
-                    <div className="text-xs text-[var(--yinn-muted)]">{r.role}</div>
-                  </div>
-                  <p className="mt-3 text-sm text-[var(--yinn-muted)] leading-relaxed">
-                    {r.text}
-                  </p>
-                  <div className="mt-4 text-sm">★★★★★</div>
-                </div>
-              ))}
+            <div className="flex gap-3">
+              <button
+                onClick={() => scrollReviews(-1)}
+                className="h-11 w-11 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
+                type="button"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <button
+                onClick={() => scrollReviews(1)}
+                className="h-11 w-11 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
+                type="button"
+              >
+                <ChevronRight size={18} />
+              </button>
             </div>
           </div>
 
-          <div className="mt-10 rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] p-4">
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              {logoList.map((x) => (
-                <div
-                  key={x}
-                  className="px-4 py-2 rounded-2xl border border-[var(--yinn-border)] text-sm font-semibold text-[var(--yinn-muted)]"
-                >
-                  {x}
+          <div
+            ref={reviewsRef}
+            className="mt-10 flex gap-4 overflow-x-auto scroll-smooth pb-2"
+            style={{ scrollbarWidth: "none" }}
+          >
+            {reviews.map((r) => (
+              <div
+                key={r.name}
+                className="min-w-[280px] sm:min-w-[340px] rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-6 shadow-[var(--yinn-soft)]"
+              >
+                <p className="text-[var(--yinn-text)] leading-relaxed">“{r.text}”</p>
+                <div className="mt-5">
+                  <div className="font-extrabold">{r.name}</div>
+                  <div className="text-sm text-[var(--yinn-muted)]">{r.role}</div>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-10 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {logoList.map((x) => (
+              <div
+                key={x}
+                className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-3 text-center text-sm font-semibold text-[var(--yinn-muted)]"
+              >
+                {x}
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
       {/* Steps */}
-      <section className="py-14 sm:py-20">
-        <div className="max-w-6xl mx-auto px-4">
+      <section id="steps" className="py-16 sm:py-20">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <SectionTitle
             badge="Langkah Demi Langkah"
             title="Cara Kerjanya"
-            desc="4 langkah mudah mendapatkan nomor virtual secara instan."
+            desc="4 langkah mudah mendapatkan Nomor Virtual secara instan!"
           />
 
-          <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {[
-              { n: 1, t: "Pilih Negara", d: "Pilih dari banyak negara yang tersedia." },
-              { n: 2, t: "Pilih Aplikasi", d: "Pilih aplikasi layanan OTP yang didukung." },
-              { n: 3, t: "Daftarkan Nomor", d: "Masukkan nomor dan minta OTP dari aplikasi." },
-              { n: 4, t: "Terima SMS", d: "Kode masuk cepat, biasanya dalam hitungan detik." },
-            ].map((x) => (
+              { n: "1", t: "Pilih Negara", d: "Pilih dari berbagai negara yang tersedia di platform." },
+              { n: "2", t: "Pilih Aplikasi", d: "Pilih aplikasi tujuan untuk registrasi/verifikasi." },
+              { n: "3", t: "Daftarkan Nomor", d: "Masukkan nomor virtual dan minta kode OTP." },
+              { n: "4", t: "Terima SMS", d: "OTP masuk cepat (biasanya dalam hitungan detik)." },
+            ].map((s) => (
               <div
-                key={x.n}
-                className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] p-5 text-center"
+                key={s.n}
+                className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-6 shadow-[var(--yinn-soft)] text-center"
               >
-                <div
-                  className="mx-auto h-14 w-14 rounded-full grid place-items-center text-white font-extrabold"
+                <div className="mx-auto h-12 w-12 rounded-full grid place-items-center font-extrabold text-white"
                   style={{
                     backgroundImage:
                       "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
                   }}
                 >
-                  {x.n}
+                  {s.n}
                 </div>
-                <h3 className="mt-4 font-extrabold">{x.t}</h3>
-                <p className="mt-2 text-sm text-[var(--yinn-muted)]">{x.d}</p>
-
-                <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] p-4 text-xs text-[var(--yinn-muted)]">
-                  (Preview step {x.n})
-                </div>
+                <h3 className="mt-4 font-extrabold">{s.t}</h3>
+                <p className="mt-2 text-sm text-[var(--yinn-muted)]">{s.d}</p>
               </div>
             ))}
           </div>
@@ -490,141 +503,22 @@ export default function Home() {
       </section>
 
       {/* FAQ */}
-      <section className="py-14 sm:py-20 border-t border-[var(--yinn-border)]">
-        <div className="max-w-6xl mx-auto px-4">
+      <section id="faq" className="py-16 sm:py-20 border-t border-[var(--yinn-border)] bg-[var(--yinn-bg)]">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <SectionTitle
             badge="FAQ"
             title="Frequently asked questions"
             desc="Beberapa pertanyaan yang sering ditanyakan."
           />
 
-          <div className="mt-10 grid lg:grid-cols-2 gap-6 items-start">
-            <div className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] p-6">
-              <div className="flex items-center gap-3">
-                <div
-                  className="h-10 w-10 rounded-2xl grid place-items-center text-white"
-                  style={{
-                    backgroundImage:
-                      "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
-                  }}
-                >
-                  <Clock size={18} />
-                </div>
-                <div>
-                  <div className="font-extrabold">Support & Info</div>
-                  <div className="text-sm text-[var(--yinn-muted)]">
-                    Jawaban ringkas biar gak ribet.
-                  </div>
-                </div>
-              </div>
-              <div className="mt-4 text-sm text-[var(--yinn-muted)] leading-relaxed">
-                Kalau ada kendala (saldo, OTP, order), langsung hubungi admin/support.
-                Nanti kita rapihin juga halaman contact biar nyambung ke channel lo.
-              </div>
-            </div>
-
-            <div className="grid gap-3">
-              <FAQItem
-                q="Asli gak bang OTP nya?"
-                a="Asli. Setelah order, sistem otomatis proses dan OTP akan muncul jika SMS masuk."
-              />
-              <FAQItem
-                q="Kalo top up gimana? takut saldo gak bisa dipake"
-                a="Aman. Kalau ada kendala, tinggal kontak support dan sertakan bukti pembayaran."
-              />
-              <FAQItem
-                q="Saldo gak masuk padahal udah bayar, gimana?"
-                a="Chat support + kirim bukti. Kalau valid, saldo akan di-approve."
-                defaultOpen
-              />
-              <FAQItem
-                q="OTP gak masuk, saldo kepotong gak?"
-                a="Ada opsi cancel sebelum waktu habis. Kalau dibatalkan sesuai aturan, saldo balik sesuai harga."
-              />
-              <FAQItem
-                q="Scam gak bang?"
-                a="Fokusnya layanan real & transparan. Kalau ada bug/masalah, lapor biar langsung dibenerin."
-              />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="py-14 sm:py-20">
-        <div className="max-w-6xl mx-auto px-4">
-          <div className="rounded-[28px] border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] overflow-hidden">
-            <div className="grid lg:grid-cols-2 gap-0">
-              <div className="p-7 sm:p-10">
-                <div className="text-sm font-semibold text-[var(--yinn-muted)]">
-                  Get Started
-                </div>
-                <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold">
-                  Siap dapat layanan?
-                </h3>
-                <p className="mt-2 text-sm sm:text-base text-[var(--yinn-muted)]">
-                  Login/Register dulu, lalu mulai order nomor virtual dan pantau OTP dari dashboard.
-                </p>
-                <div className="mt-6 flex flex-col sm:flex-row gap-3">
-                  <Link href="/login">
-                    <PrimaryButton>
-                      Login/Register <ArrowRight size={18} />
-                    </PrimaryButton>
-                  </Link>
-                  <Link href="/dashboard">
-                    <OutlineButton>
-                      Ke Dashboard <ArrowRight size={18} />
-                    </OutlineButton>
-                  </Link>
-                </div>
-              </div>
-
-              <div className="p-7 sm:p-10 relative">
-                <div
-                  className="absolute inset-0 opacity-[0.18]"
-                  style={{
-                    backgroundImage:
-                      "radial-gradient(circle at 20% 30%, var(--yinn-brand-to) 0, transparent 45%), radial-gradient(circle at 80% 60%, var(--yinn-brand-from) 0, transparent 45%)",
-                  }}
-                />
-                <div className="relative rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-bg)] p-6">
-                  <div className="font-extrabold">Kenapa YinnOTP?</div>
-                  <ul className="mt-3 grid gap-2 text-sm text-[var(--yinn-muted)]">
-                    <li className="flex gap-2">
-                      <span>•</span> UI rapi & ringan
-                    </li>
-                    <li className="flex gap-2">
-                      <span>•</span> Flow order jelas
-                    </li>
-                    <li className="flex gap-2">
-                      <span>•</span> Siap untuk API integration
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Contact */}
-      <section className="py-14 sm:py-20 border-t border-[var(--yinn-border)]">
-        <div className="max-w-6xl mx-auto px-4">
-          <SectionTitle
-            badge="Contact Us"
-            title="Let’s work together"
-            desc="Punya pertanyaan atau aduan? Hubungi kami."
-          />
-
-          <div className="mt-10 grid lg:grid-cols-2 gap-6">
-            <div className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] p-6">
-              <div className="font-extrabold text-lg">Kontak</div>
-              <p className="mt-2 text-sm text-[var(--yinn-muted)]">
-                Isi contact form atau langsung chat ke channel support.
+          <div className="mt-12 grid lg:grid-cols-2 gap-6 items-start">
+            <div className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-6 shadow-[var(--yinn-soft)]">
+              <h3 className="font-extrabold text-xl">Butuh bantuan cepat?</h3>
+              <p className="mt-2 text-[var(--yinn-muted)]">
+                Kalau ada kendala topup, order, atau OTP tidak masuk, langsung hubungi support.
               </p>
-
               <div className="mt-6 grid gap-3">
-                <div className="rounded-2xl border border-[var(--yinn-border)] p-4 flex items-center gap-3">
+                <div className="flex items-center gap-3">
                   <div
                     className="h-10 w-10 rounded-2xl grid place-items-center text-white"
                     style={{
@@ -642,7 +536,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-[var(--yinn-border)] p-4 flex items-center gap-3">
+                <div className="flex items-center gap-3">
                   <div
                     className="h-10 w-10 rounded-2xl grid place-items-center text-white"
                     style={{
@@ -650,7 +544,6 @@ export default function Home() {
                         "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
                     }}
                   >
-                    {/* FIX: Lucide gak punya icon Telegram, jadi pake Send */}
                     <Send size={18} />
                   </div>
                   <div>
@@ -659,93 +552,125 @@ export default function Home() {
                   </div>
                 </div>
               </div>
-
-              <div className="mt-6 text-xs text-[var(--yinn-muted)]">
-                * Nanti tinggal lo ganti username/email sesuai real channel YINN STORE.
-              </div>
             </div>
 
-            <div className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] p-6">
-              <div className="font-extrabold text-lg">Kirim pesan</div>
-              <p className="mt-2 text-sm text-[var(--yinn-muted)]">
-                Form ini buat tampilan dulu. Nanti kita sambungin ke backend lo kalau mau.
-              </p>
+            <div className="grid gap-4">
+              <FAQItem
+                q="Asli gak bang OTP nya?"
+                a="Asli. Sistem otomatis, nomor muncul setelah order dan OTP masuk sesuai layanan yang dipilih."
+                defaultOpen
+              />
+              <FAQItem
+                q="Kalo top up gimana? takut saldo gak bisa dipake"
+                a="Aman. Kalau ada kendala, chat support dan sertakan bukti pembayaran."
+              />
+              <FAQItem
+                q="Saldo gak masuk padahal udah bayar, gimana?"
+                a="Hubungi support, kirim bukti pembayaran/riwayat transfer. Nanti dicek dan diselesaikan."
+              />
+              <FAQItem
+                q="OTP gak masuk, saldo kepotong gak?"
+                a="Ada opsi cancel sebelum waktu habis. Saldo biasanya direfund sesuai kebijakan layanan."
+              />
+              <FAQItem
+                q="Scam gak bang?"
+                a="Insyaallah nggak. Kalau ada bug atau kendala, lapor ke owner/support biar cepat ditangani."
+              />
+            </div>
+          </div>
+        </div>
+      </section>
 
-              <form className="mt-6 grid gap-3" onSubmit={(e) => e.preventDefault()}>
-                <div className="grid sm:grid-cols-2 gap-3">
-                  <input
-                    className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-bg)] px-4 py-3 text-sm outline-none"
-                    placeholder="Full Name"
-                  />
-                  <input
-                    className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-bg)] px-4 py-3 text-sm outline-none"
-                    placeholder="Email"
-                  />
+      {/* CTA */}
+      <section id="cta" className="py-16 sm:py-20">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[var(--yinn-soft)] overflow-hidden">
+            <div className="p-8 sm:p-12 grid lg:grid-cols-2 gap-10 items-center">
+              <div>
+                <h3 className="text-3xl font-extrabold tracking-tight">
+                  Siap dapat layanan?
+                </h3>
+                <p className="mt-3 text-[var(--yinn-muted)] text-lg">
+                  Terima OTP nokos murah kamu sekarang juga.
+                </p>
+                <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                  <Link href="/dashboard">
+                    <PrimaryButton className="w-full sm:w-auto">
+                      Get Started <ArrowRight size={18} />
+                    </PrimaryButton>
+                  </Link>
+                  <Link href="/pricing">
+                    <OutlineButton className="w-full sm:w-auto">
+                      Lihat Pricing
+                    </OutlineButton>
+                  </Link>
                 </div>
-                <textarea
-                  className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-bg)] px-4 py-3 text-sm outline-none min-h-[140px]"
-                  placeholder="Message"
-                />
-                <PrimaryButton type="submit" className="py-3">
-                  Send inquiry <ArrowRight size={18} />
-                </PrimaryButton>
-              </form>
+              </div>
+
+              <div className="rounded-3xl border border-[var(--yinn-border)] bg-[var(--yinn-bg)] p-6">
+                <div className="font-extrabold">Kenapa YinnOTP?</div>
+                <ul className="mt-4 grid gap-3 text-[var(--yinn-muted)]">
+                  <li className="flex items-start gap-2">
+                    <BadgeCheck className="mt-0.5" size={18} />
+                    Nomor fresh & kualitas terjaga
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <Bolt className="mt-0.5" size={18} />
+                    OTP cepat masuk, cocok buat verifikasi
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <ShieldCheck className="mt-0.5" size={18} />
+                    API ready untuk integrasi bot/automation
+                  </li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-[var(--yinn-border)]">
-        <div className="max-w-6xl mx-auto px-4 py-10">
-          <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-6">
-            <div className="lg:col-span-2">
-              <Brand />
-              <p className="mt-3 text-sm text-[var(--yinn-muted)] leading-relaxed max-w-md">
-                YinnOTP menyediakan nomor virtual murah dan berkualitas untuk ribuan aplikasi dari berbagai negara.
-                Tersedia juga REST API untuk kebutuhan integrasi verifikasi.
-              </p>
-            </div>
+      <footer className="border-t border-[var(--yinn-border)] bg-[var(--yinn-bg)]">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-12 grid sm:grid-cols-2 lg:grid-cols-5 gap-8">
+          <div className="lg:col-span-2">
+            <Brand />
+            <p className="mt-4 text-[var(--yinn-muted)] leading-relaxed">
+              Nomor virtual murah dan berkualitas untuk ribuan aplikasi. Tersedia juga
+              layanan REST API untuk kebutuhan integrasi verifikasi Anda.
+            </p>
+          </div>
 
-            <div>
-              <div className="font-extrabold">Company</div>
-              <div className="mt-3 grid gap-2 text-sm text-[var(--yinn-muted)]">
-                <Link href="/privacy" className="hover:underline">
-                  Privacy Policy
-                </Link>
-                <Link href="/terms" className="hover:underline">
-                  Terms & Conditions
-                </Link>
-              </div>
-            </div>
-
-            <div>
-              <div className="font-extrabold">Docs</div>
-              <div className="mt-3 grid gap-2 text-sm text-[var(--yinn-muted)]">
-                <Link href="/register" className="hover:underline">
-                  Get Started
-                </Link>
-                <Link href="/order" className="hover:underline">
-                  Order (dev)
-                </Link>
-              </div>
-            </div>
-
-            <div>
-              <div className="font-extrabold">Contact</div>
-              <div className="mt-3 grid gap-2 text-sm text-[var(--yinn-muted)]">
-                <span>Telegram: @yinnotp</span>
-                <span>Email: support@yinnotp.com</span>
-              </div>
+          <div>
+            <div className="font-extrabold">Company</div>
+            <div className="mt-3 grid gap-2 text-sm text-[var(--yinn-muted)]">
+              <Link href="/blog/about-us">About Us</Link>
+              <Link href="/blog/privacy-policy">Privacy Policy</Link>
+              <Link href="/blog/terms-and-conditions">Terms & Conditions</Link>
             </div>
           </div>
 
-          <div className="mt-10 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-[var(--yinn-muted)]">
-            <span>© {new Date().getFullYear()} • YinnOTP</span>
-            <span>Build with Next.js</span>
+          <div>
+            <div className="font-extrabold">Docs</div>
+            <div className="mt-3 grid gap-2 text-sm text-[var(--yinn-muted)]">
+              <Link href="/register">Get Started</Link>
+              <Link href="/developer/api">Documentation API</Link>
+              <Link href="/pricing">Pricing</Link>
+            </div>
+          </div>
+
+          <div>
+            <div className="font-extrabold">Contact</div>
+            <div className="mt-3 grid gap-2 text-sm text-[var(--yinn-muted)]">
+              <span>Telegram: @yinnotp</span>
+              <span>Email: support@yinnotp.com</span>
+            </div>
           </div>
         </div>
+
+        <div className="py-5 text-center text-sm text-[var(--yinn-muted)] border-t border-[var(--yinn-border)]">
+          © {new Date().getFullYear()} • Build on YinnOTP
+        </div>
       </footer>
-    </main>
+    </div>
   );
 }

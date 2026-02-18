@@ -2,7 +2,7 @@
 
 import "./login.css";
 import { useEffect, useState } from "react";
-import toast, { Toaster } from "react-hot-toast";
+import toast from "react-hot-toast";
 import { signIn, getCsrfToken } from "next-auth/react";
 
 const TTL = 12 * 60 * 60 * 1000;
@@ -10,8 +10,7 @@ const DASHBOARD_URL = "/dashboard";
 
 function safeJson(text) {
   try {
-    if (!text) return {};
-    return JSON.parse(text);
+    return text ? JSON.parse(text) : {};
   } catch {
     return {};
   }
@@ -21,54 +20,40 @@ function readLastSession() {
   try {
     const raw = localStorage.getItem("yinnotp:last_session");
     if (!raw) return null;
-
     const obj = JSON.parse(raw);
     const ts = Number(obj?.ts || 0);
-
     if (!ts || Date.now() - ts > TTL) {
       localStorage.removeItem("yinnotp:last_session");
       return null;
     }
-
     if (!obj?.token || !obj?.username) return null;
-    return { username: obj.username, email: obj?.email || "", token: obj.token, ts };
+    return { username: obj.username, email: obj.email || "", token: obj.token, ts };
   } catch {
     try { localStorage.removeItem("yinnotp:last_session"); } catch {}
     return null;
   }
 }
 
-/**
- * Simpan identitas user AKTIF + token backend
- * penting: /topup/pay & /topup page butuh token.
- */
 function setActiveUser(username, email, token, fallbackIdent = "") {
   const u = String(username || fallbackIdent || "").trim();
   if (!u) return;
 
-  // active identity
   localStorage.setItem("yinnotp_active_user", u);
   localStorage.setItem("yinnotp_user_id", u);
   localStorage.setItem("yinnotp_username", u);
   localStorage.setItem("yinnotp_name", u);
   if (email) localStorage.setItem("yinnotp_email", String(email));
 
-  // IMPORTANT: token backend (dipakai halaman deposit/pay)
-  if (token) {
-    localStorage.setItem("yinnotp_token", String(token)); // key utama
-    localStorage.setItem("yinnotp_token_active", String(token)); // kompat
-    localStorage.setItem(`yinnotp_token:${u}`, String(token)); // per-user
-  }
+  // token backend (WAJIB buat topup/pay)
+  if (token) localStorage.setItem("yinnotp_token", String(token));
 
-  // clear cache GLOBAL (legacy)
+  // bersihin cache global + cache per-user biar akun beda gak ketuker
   localStorage.removeItem("yinnotp_balance");
   localStorage.removeItem("yinnotp_deposit_history");
-
-  // clear cache PER-USER (biar akun beda gak ketuker)
   try {
     localStorage.removeItem(`yinnotp_balance:${u}`);
     localStorage.removeItem(`yinnotp_deposit_history:${u}`);
-    localStorage.removeItem(`yinnotp_deposit_last_sync:${u}`);
+    localStorage.removeItem(`yinnotp_last_sync:${u}`);
   } catch {}
 }
 
@@ -82,12 +67,29 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true);
 
   useEffect(() => {
-    // prewarm next-auth biar klik sosial cepet
+    // prewarm next-auth biar tombol social responsif
     try { getCsrfToken().catch(() => {}); } catch {}
     try { fetch("/api/auth/providers", { cache: "no-store" }).catch(() => {}); } catch {}
 
     setLast(readLastSession());
   }, []);
+
+  function explainLoginError(status, j) {
+    const msg = String(j?.message || "").toLowerCase();
+
+    if (status === 404) return "Endpoint login belum ada. Pastikan `app/api/auth/login/route.js` sudah ditambah & deploy.";
+    if (status === 401 || status === 403) return "Username/email atau password salah.";
+    if (status === 429) return "Terlalu banyak percobaan. Coba lagi sebentar.";
+    if (status >= 500) return "Server backend error. Coba lagi nanti.";
+
+    // fallback dari message backend
+    if (msg.includes("password")) return "Password salah.";
+    if (msg.includes("username") || msg.includes("email")) return "Username/email tidak ditemukan.";
+    if (msg.includes("verify")) return "Akun belum terverifikasi.";
+    if (j?.message) return j.message;
+
+    return "Login gagal.";
+  }
 
   async function submitLogin(e) {
     e.preventDefault();
@@ -109,7 +111,7 @@ export default function LoginPage() {
       const j = safeJson(t);
 
       if (!r.ok || !j.ok) {
-        toast.error(j.message || "Login gagal");
+        toast.error(explainLoginError(r.status, j));
         return;
       }
 
@@ -117,19 +119,17 @@ export default function LoginPage() {
       const email = String(j.data?.email || "").trim();
       const token = String(j.data?.token || "").trim();
 
-      // set active user + token backend
+      if (!token) {
+        toast.error("Login berhasil tapi token kosong. Backend login.php wajib return `data.token`.");
+        return;
+      }
+
       setActiveUser(username, email, token, id);
 
-      // remember session (buat auto login)
-      if (remember && token && username) {
+      if (remember) {
         localStorage.setItem(
           "yinnotp:last_session",
-          JSON.stringify({
-            username,
-            email,
-            token,
-            ts: Date.now(),
-          })
+          JSON.stringify({ username, email, token, ts: Date.now() })
         );
         setLast({ username, email, token, ts: Date.now() });
       }
@@ -137,7 +137,7 @@ export default function LoginPage() {
       toast.success("Login berhasil");
       window.location.replace(DASHBOARD_URL);
     } catch {
-      toast.error("Server error / koneksi putus");
+      toast.error("Koneksi putus / server error");
     } finally {
       setLoading(false);
     }
@@ -146,7 +146,7 @@ export default function LoginPage() {
   async function clickSaved() {
     const cur = readLastSession();
     if (!cur) {
-      toast.error("Belum ada sesi login, silakan sign in");
+      toast.error("Belum ada sesi tersimpan, silakan login");
       setLast(null);
       return;
     }
@@ -169,13 +169,11 @@ export default function LoginPage() {
         return;
       }
 
-      // SET ACTIVE + token backend dari last_session
       setActiveUser(cur.username, cur.email, cur.token, cur.username);
-
       toast.success("Auto login berhasil");
       window.location.replace(DASHBOARD_URL);
     } catch {
-      toast.error("Server error / koneksi putus");
+      toast.error("Koneksi putus / server error");
     } finally {
       setLoading(false);
     }
@@ -183,8 +181,6 @@ export default function LoginPage() {
 
   return (
     <div className="login-wrap">
-      <Toaster position="top-right" />
-
       <div className="dots-decoration dots-top-right"></div>
       <div className="dots-decoration dots-bottom-left"></div>
 
@@ -197,36 +193,19 @@ export default function LoginPage() {
         <p className="subtitle">Please sign-in to your account to view the dashboard</p>
 
         <div className="social-buttons">
-          <button
-            className="btn-social"
-            type="button"
-            onClick={() => signIn("google", { callbackUrl: DASHBOARD_URL })}
-          >
-            <img
-              src="https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png"
-              width="18"
-              alt="Google"
-            />
+          <button className="btn-social" type="button" onClick={() => signIn("google", { callbackUrl: DASHBOARD_URL })}>
+            <img src="https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png" width="18" alt="Google" />
             Google
           </button>
 
-          <button
-            className="btn-social"
-            type="button"
-            onClick={() => signIn("github", { callbackUrl: DASHBOARD_URL })}
-          >
+          <button className="btn-social" type="button" onClick={() => signIn("github", { callbackUrl: DASHBOARD_URL })}>
             <i className="fab fa-github"></i>
             GitHub
           </button>
         </div>
 
         {last?.username ? (
-          <div
-            className="saved-account"
-            onClick={clickSaved}
-            role="button"
-            title="Klik untuk auto login"
-          >
+          <div className="saved-account" onClick={clickSaved} role="button" title="Klik untuk auto login">
             <div className="account-info">
               <div className="avatar">{String(last.username).slice(0, 1).toUpperCase()}</div>
               <div className="account-details">
@@ -275,21 +254,10 @@ export default function LoginPage() {
 
           <div className="form-options">
             <label className="remember-me">
-              <input
-                type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
-              />
+              <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
               Remember Me
             </label>
-            <a
-              href="#"
-              className="forgot-pass"
-              onClick={(e) => {
-                e.preventDefault();
-                toast("Coming soon");
-              }}
-            >
+            <a href="#" className="forgot-pass" onClick={(e) => { e.preventDefault(); toast("Coming soon"); }}>
               Forgot Password?
             </a>
           </div>

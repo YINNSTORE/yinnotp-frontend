@@ -2,418 +2,358 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import toast, { Toaster } from "react-hot-toast";
-import QRCode from "qrcode";
 import Link from "next/link";
+import toast, { Toaster } from "react-hot-toast";
 
-const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+const TTL = 12 * 60 * 60 * 1000;
 
-const formatIDR = (n) =>
-  new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  }).format(Number.isFinite(n) ? n : 0);
+function safeJson(text) {
+  try {
+    if (!text) return null;
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
 
-function getActiveUserId() {
-  if (typeof window === "undefined") return "";
-  const direct =
-    localStorage.getItem("yinnotp_active_user") ||
-    localStorage.getItem("yinnotp_user_id") ||
-    localStorage.getItem("user_id") ||
-    localStorage.getItem("username") ||
-    "";
-  if (direct) return direct;
-
-  // fallback: last_session
+function readLastSession() {
   try {
     const raw = localStorage.getItem("yinnotp:last_session");
-    const obj = raw ? JSON.parse(raw) : null;
-    return obj?.username || "";
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    const ts = Number(obj?.ts || 0);
+    if (!ts || Date.now() - ts > TTL) return null;
+    if (!obj?.token) return null;
+    return obj;
+  } catch {
+    return null;
+  }
+}
+
+function getActiveUserId() {
+  try {
+    return (
+      localStorage.getItem("yinnotp_user_id") ||
+      localStorage.getItem("yinnotp_active_user") ||
+      localStorage.getItem("user_id") ||
+      localStorage.getItem("username") ||
+      readLastSession()?.username ||
+      ""
+    );
   } catch {
     return "";
   }
 }
 
-function k(uid, name) {
-  return `yinnotp:${uid}:${name}`;
-}
-
-async function readJsonSafe(res) {
-  const text = await res.text();
-  if (!text) return { __empty: true };
+function getToken() {
   try {
-    return JSON.parse(text);
+    const s = readLastSession();
+    if (s?.token) return String(s.token);
+    return String(localStorage.getItem("yinnotp_token") || "");
   } catch {
-    return { __raw: text };
+    return "";
   }
 }
 
-function shortOrderId(orderId) {
-  const s = String(orderId || "");
-  if (s.length <= 14) return s;
-  return `${s.slice(0, 10)}…${s.slice(-4)}`;
+function authHeaders(uid) {
+  const token = getToken();
+  const h = { "Content-Type": "application/json", "x-user-id": uid };
+  if (token) {
+    h["Authorization"] = `Bearer ${token}`;
+    h["x-token"] = token;
+    h["x-auth-token"] = token;
+  }
+  return h;
 }
 
 export default function PayClient() {
   const sp = useSearchParams();
   const router = useRouter();
 
-  const timerRef = useRef(null);
-
   const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
 
-  const method = (sp.get("method") || "qris").toLowerCase();
-  const amountRaw = sp.get("amount") || "2000";
-  const orderFromUrl = sp.get("order_id") || "";
+  const method = sp.get("method") || "qris";
+  const amount = sp.get("amount") || "0";
+  const order_id = sp.get("order_id") || "";
   const resume = sp.get("resume") === "1";
 
-  const amount = useMemo(() => {
-    const n = Number(String(amountRaw).replace(/[^\d]/g, "")) || 2000;
-    return clamp(n, 2000, 1000000);
-  }, [amountRaw]);
+  const uid = useMemo(() => (typeof window === "undefined" ? "" : getActiveUserId()), []);
+  const token = useMemo(() => (typeof window === "undefined" ? "" : getToken()), []);
 
-  const [mounted, setMounted] = useState(false);
-  const [orderId, setOrderId] = useState(orderFromUrl);
+  const isLoggedIn = Boolean(uid && token);
+
   const [loading, setLoading] = useState(true);
-  const [qrText, setQrText] = useState("");
-  const [qrImg, setQrImg] = useState("");
-  const [fee, setFee] = useState(0);
-  const [total, setTotal] = useState(amount);
-  const [status, setStatus] = useState("pending"); // pending | completed | failed
   const [err, setErr] = useState("");
+  const [qr, setQr] = useState(""); // dataUrl / image url
+  const [status, setStatus] = useState("pending"); // pending / completed
+  const [fee, setFee] = useState(0);
+  const [total, setTotal] = useState(Number(amount || 0));
 
-  const uid = useMemo(() => getActiveUserId(), [mounted]);
+  const confirmedRef = useRef(false);
+  const toastErrOnceRef = useRef(false);
 
-  useEffect(() => setMounted(true), []);
+  const cacheKey = useMemo(() => (uid && order_id ? `deposit_qr:${uid}:${order_id}` : ""), [uid, order_id]);
 
-  useEffect(() => {
-    // kalau order_id kosong, bikin dan replace URL (biar konsisten)
-    if (!mounted) return;
-    if (orderId) return;
-    const r = Math.random().toString(16).slice(2, 8).toUpperCase();
-    const oid = `YINN-${Date.now()}-${r}`;
-    setOrderId(oid);
-    router.replace(
-      `/topup/pay?method=${encodeURIComponent(method)}&amount=${encodeURIComponent(
-        String(amount)
-      )}&order_id=${encodeURIComponent(oid)}`
-    );
-  }, [mounted, orderId, router, method, amount]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    if (!backend) {
-      setErr("NEXT_PUBLIC_BACKEND_URL belum diset di Vercel");
-      setLoading(false);
-      return;
-    }
-    if (!orderId) return;
-
-    // ❌ jangan auto redirect ke login, bikin UX kacau
-    if (!uid) {
-      setErr("Session user tidak ketemu. Login dulu ya.");
-      setLoading(false);
-      return;
-    }
-
-    const tid = toast.loading("Menyiapkan pembayaran...");
-
-    const startPoll = () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      timerRef.current = setInterval(() => {
-        checkStatus().catch(() => {});
-      }, 3000);
-    };
-
-    const makeQr = async (text) => {
-      const dataUrl = await QRCode.toDataURL(text, {
-        margin: 1,
-        width: 360,
-        errorCorrectionLevel: "M",
+  async function syncMeAfterSuccess() {
+    if (!backend || !uid) return;
+    try {
+      const r = await fetch(`${backend}/deposit/me?user_id=${encodeURIComponent(uid)}`, {
+        cache: "no-store",
+        headers: authHeaders(uid),
       });
-      setQrImg(dataUrl);
-    };
+      const t = await r.text();
+      const j = safeJson(t);
+      if (!r.ok || !j?.ok) return;
 
-    const loadFromCacheIfAny = async () => {
-      const cached = localStorage.getItem(k(uid, `deposit_qr:${orderId}`));
-      if (cached) {
-        setQrText(cached);
-        await makeQr(cached);
-        setLoading(false);
-        toast.success("QR berhasil dimuat", { id: tid });
-        startPoll();
-        // kalau resume, langsung cek status biar cepat
-        if (resume) checkStatus().catch(() => {});
-        return true;
-      }
-      return false;
-    };
+      const bal = Number(j.balance || 0) || 0;
+      const hist = Array.isArray(j.history) ? j.history : [];
 
-    const createTx = async () => {
-      setErr("");
-      setLoading(true);
+      localStorage.setItem(`yinnotp_balance:${uid}`, String(bal));
+      localStorage.setItem(`yinnotp_deposit_history:${uid}`, JSON.stringify(hist));
+      localStorage.setItem(`yinnotp_last_sync:${uid}`, String(Date.now()));
 
-      const res = await fetch(`${backend}/deposit/create`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-user-id": uid,
-        },
-        body: JSON.stringify({
-          user_id: uid,
-          order_id: orderId,
-          amount,
-          method,
-        }),
-      });
+      // legacy
+      localStorage.setItem("yinnotp_balance", String(bal));
+      localStorage.setItem("yinnotp_deposit_history", JSON.stringify(hist));
+    } catch {}
+  }
 
-      const j = await readJsonSafe(res);
+  async function createTx() {
+    if (!backend) throw new Error("Backend URL belum diset");
+    const r = await fetch(`${backend}/deposit/create`, {
+      method: "POST",
+      headers: authHeaders(uid),
+      body: JSON.stringify({
+        user_id: uid,
+        order_id,
+        method,
+        amount: Number(amount || 0),
+      }),
+    });
+    const t = await r.text();
+    const j = safeJson(t);
+    if (!r.ok || !j?.ok) throw new Error(String(j?.message || "Gagal buat transaksi"));
 
-      if (!res.ok || !j?.ok) {
-        const msg =
-          j?.message ||
-          j?.error ||
-          (j?.__raw ? "Respon backend bukan JSON" : "") ||
-          "Gagal membuat transaksi";
-        throw new Error(msg);
-      }
+    // fleksibel: backend lo mungkin return qr berbeda key
+    const qrValue =
+      j.qr ||
+      j.qr_image ||
+      j.qr_url ||
+      j.data?.qr ||
+      j.data?.qr_image ||
+      j.data?.qr_url ||
+      "";
 
-      const pay = j?.data?.payment_number || j?.data?.qr_string || "";
-      const feeVal = Number(j?.data?.fee || 0) || 0;
-      const totalVal = Number(j?.data?.total || j?.data?.total_payment || amount) || amount;
+    const feeValue = Number(j.fee || j.data?.fee || 0) || 0;
+    const totalValue = Number(j.total || j.data?.total || Number(amount || 0)) || Number(amount || 0);
 
-      if (!pay) throw new Error("QR/payment_number kosong dari backend");
+    setQr(String(qrValue || ""));
+    setFee(feeValue);
+    setTotal(totalValue);
 
-      // cache QR per order biar klik riwayat pending bisa kebuka lagi
-      localStorage.setItem(k(uid, `deposit_qr:${orderId}`), String(pay));
-
-      // cache history per user (pending)
+    // cache QR supaya kalau pending dipencet bisa kebuka lagi tanpa bikin order baru
+    if (cacheKey && qrValue) {
       try {
-        const hk = k(uid, "deposit_history");
-        const old = JSON.parse(localStorage.getItem(hk) || "[]");
-        const arr = Array.isArray(old) ? old : [];
-        const exists = arr.some((x) => x?.order_id === orderId);
-        const next = exists
-          ? arr
-          : [
-              {
-                order_id: orderId,
-                amount,
-                method,
-                status: "pending",
-                created_at: new Date().toISOString(),
-              },
-              ...arr,
-            ];
-        localStorage.setItem(hk, JSON.stringify(next));
-        // legacy key (biar page lain gak blank)
-        localStorage.setItem("yinnotp_deposit_history", JSON.stringify(next));
+        localStorage.setItem(cacheKey, String(qrValue));
       } catch {}
+    }
 
-      setQrText(pay);
-      setFee(feeVal);
-      setTotal(totalVal);
-      await makeQr(pay);
+    return j;
+  }
 
-      setLoading(false);
-      toast.success("QR siap, silakan scan", { id: tid });
+  async function getDetail() {
+    if (!backend) return null;
+    const r = await fetch(
+      `${backend}/deposit/detail?order_id=${encodeURIComponent(order_id)}&amount=${encodeURIComponent(amount)}`,
+      { cache: "no-store", headers: authHeaders(uid) }
+    );
+    const t = await r.text();
+    const j = safeJson(t);
+    if (!r.ok || !j) return null;
+    return j;
+  }
 
-      startPoll();
-    };
+  async function confirmIfCompleted() {
+    if (confirmedRef.current) return;
+    confirmedRef.current = true;
 
-    const run = async () => {
-      try {
-        const cachedOk = await loadFromCacheIfAny();
-        if (!cachedOk) await createTx();
-      } catch (e) {
-        setErr(String(e?.message || e));
-        setLoading(false);
-        toast.error(String(e?.message || e), { id: tid });
+    try {
+      const r = await fetch(`${backend}/deposit/confirm`, {
+        method: "POST",
+        headers: authHeaders(uid),
+        body: JSON.stringify({ user_id: uid, order_id }),
+      });
+      const t = await r.text();
+      const j = safeJson(t);
+
+      if (!r.ok || !j?.ok) {
+        confirmedRef.current = false;
+        throw new Error(String(j?.message || "Gagal konfirmasi deposit"));
       }
-    };
 
-    run();
+      await syncMeAfterSuccess();
+      toast.success("Deposit sukses ✅", { id: "dep-ok" });
+      router.replace(`/topup/success?order_id=${encodeURIComponent(order_id)}&amount=${encodeURIComponent(amount)}`);
+    } catch (e) {
+      toast.error(String(e?.message || "Gagal konfirmasi deposit"), { id: "dep-confirm-fail" });
+    }
+  }
+
+  useEffect(() => {
+    if (!order_id) {
+      router.replace("/topup");
+      return;
+    }
+
+    // kalau belum login, jangan spam toast
+    if (!isLoggedIn) {
+      setLoading(false);
+      setErr("Session user tidak ketemu. Login dulu ya.");
+      return;
+    }
+
+    // load cache QR kalau resume / pending dibuka lagi
+    if (resume && cacheKey) {
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) setQr(cached);
+      } catch {}
+    }
+
+    let stop = false;
+
+    (async () => {
+      setLoading(true);
+      setErr("");
+
+      try {
+        // 1) coba detail dulu
+        const d = await getDetail();
+        const st = String(d?.status || d?.data?.status || "pending").toLowerCase();
+        if (st) setStatus(st);
+
+        const qrValue =
+          d?.qr || d?.qr_image || d?.qr_url || d?.data?.qr || d?.data?.qr_image || d?.data?.qr_url || "";
+        if (qrValue) {
+          setQr(String(qrValue));
+          if (cacheKey) localStorage.setItem(cacheKey, String(qrValue));
+        }
+
+        // 2) kalau belum ada, create transaksi
+        if (!qrValue && !qr) {
+          await createTx();
+        }
+
+        setLoading(false);
+
+        // 3) polling status tiap 3 detik
+        const timer = setInterval(async () => {
+          if (stop) return;
+          const dd = await getDetail();
+          const st2 = String(dd?.status || dd?.data?.status || "pending").toLowerCase();
+          if (st2) setStatus(st2);
+
+          if (st2 === "completed" || st2 === "success" || st2 === "paid") {
+            await confirmIfCompleted();
+          }
+        }, 3000);
+
+        return () => clearInterval(timer);
+      } catch (e) {
+        setLoading(false);
+        setErr(String(e?.message || "Error"));
+        if (!toastErrOnceRef.current) {
+          toastErrOnceRef.current = true;
+          toast.error(String(e?.message || "Gagal memuat pembayaran"), { id: "pay-load-fail" });
+        }
+      }
+    })();
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      stop = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, backend, uid, orderId, amount, method, resume]);
-
-  const checkStatus = async () => {
-    if (!backend || !uid || !orderId) return;
-
-    const res = await fetch(
-      `${backend}/deposit/detail?order_id=${encodeURIComponent(
-        orderId
-      )}&amount=${encodeURIComponent(String(amount))}&method=${encodeURIComponent(
-        method
-      )}`,
-      { cache: "no-store", headers: { "x-user-id": uid } }
-    );
-
-    const j = await readJsonSafe(res);
-    if (!res.ok || !j?.ok) return;
-
-    const st = String(j?.data?.status || j?.status || "").toLowerCase();
-
-    if (st === "completed" || st === "success" || st === "paid") {
-      setStatus("completed");
-
-      // confirm / credit (kalau backend lu idempotent, aman dipanggil berkali-kali)
-      try {
-        const cr = await fetch(`${backend}/deposit/confirm`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-user-id": uid,
-          },
-          body: JSON.stringify({ user_id: uid, order_id: orderId, amount, method }),
-        });
-        const cj = await readJsonSafe(cr);
-
-        // update cache saldo & history per user kalau backend ngasih
-        const newBal = Number(cj?.balance ?? cj?.data?.balance);
-        const hist = cj?.history ?? cj?.data?.history;
-
-        if (Number.isFinite(newBal)) {
-          localStorage.setItem(k(uid, "balance"), String(newBal));
-          localStorage.setItem("yinnotp_balance", String(newBal)); // legacy
-        }
-        if (Array.isArray(hist)) {
-          localStorage.setItem(k(uid, "deposit_history"), JSON.stringify(hist));
-          localStorage.setItem("yinnotp_deposit_history", JSON.stringify(hist));
-        }
-      } catch {}
-
-      if (timerRef.current) clearInterval(timerRef.current);
-      toast.success("Pembayaran sukses ✅");
-
-      router.replace(
-        `/topup/success?order_id=${encodeURIComponent(orderId)}&amount=${encodeURIComponent(
-          String(amount)
-        )}`
-      );
-    }
-  };
+  }, [order_id]);
 
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)] px-4 py-8">
       <Toaster position="top-right" />
+
       <div className="mx-auto max-w-[520px]">
         <div
           className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-5"
           style={{ boxShadow: "var(--yinn-soft)" }}
         >
-          <div className="text-lg font-extrabold">Deposit via {method.toUpperCase()}</div>
-          <div className="mt-1 text-sm text-[var(--yinn-muted)]">
-            Order ID: <span className="font-semibold">{shortOrderId(orderId)}</span>
-          </div>
+          <div className="text-lg font-extrabold">Deposit via QRIS</div>
 
           <div className="mt-2 text-sm text-[var(--yinn-muted)]">
-            Nominal: <span className="font-extrabold">{formatIDR(amount)}</span>
+            Order ID: <span className="font-semibold">{order_id}</span>
           </div>
-          {fee ? (
-            <div className="text-sm text-[var(--yinn-muted)]">
-              Fee: <span className="font-bold">{formatIDR(fee)}</span>
-            </div>
-          ) : null}
           <div className="text-sm text-[var(--yinn-muted)]">
-            Total: <span className="font-extrabold">{formatIDR(total)}</span>
+            Nominal: <span className="font-semibold">Rp {amount}</span>
+          </div>
+          <div className="text-sm text-[var(--yinn-muted)]">
+            Total: <span className="font-semibold">Rp {total}</span>
           </div>
 
-          {!uid ? (
-            <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] p-4">
-              <div className="text-sm font-extrabold">Belum login</div>
-              <div className="mt-1 text-sm text-[var(--yinn-muted)]">
-                {err || "Silakan login dulu biar deposit nempel ke akun yang benar."}
-              </div>
-              <div className="mt-3 flex gap-2">
-                <Link
-                  href="/login"
-                  className="rounded-xl px-4 py-2 text-sm font-extrabold text-white"
-                  style={{
-                    background:
-                      "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
-                  }}
-                >
-                  Login
-                </Link>
-                <Link
-                  href="/topup"
-                  className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-2 text-sm font-bold"
-                >
-                  Balik
-                </Link>
-              </div>
-            </div>
-          ) : null}
+          <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] p-4">
+            {err ? (
+              <>
+                <div className="text-sm font-extrabold">Belum login</div>
+                <div className="mt-1 text-sm text-[var(--yinn-muted)]">{err}</div>
+                <div className="mt-3 flex gap-2">
+                  <Link
+                    href="/login"
+                    className="rounded-xl px-4 py-2 text-sm font-extrabold text-white"
+                    style={{
+                      background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                    }}
+                  >
+                    Login
+                  </Link>
+                  <Link
+                    href="/topup"
+                    className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-2 text-sm font-bold"
+                  >
+                    Balik
+                  </Link>
+                </div>
+              </>
+            ) : loading ? (
+              <div className="text-sm font-bold text-[var(--yinn-muted)]">Menyiapkan pembayaran…</div>
+            ) : qr ? (
+              <div className="grid place-items-center gap-3">
+                <div className="text-sm font-bold">Scan QR di bawah</div>
+                <div className="rounded-2xl border border-[var(--yinn-border)] bg-white p-3">
+                  <img src={qr} alt="QRIS" className="h-[240px] w-[240px]" />
+                </div>
+                <div className="text-xs text-[var(--yinn-muted)]">
+                  Status: <span className="font-semibold">{status}</span>
+                </div>
 
-          {uid ? (
-            <>
-              <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] p-4">
-                {loading ? (
-                  <div className="text-sm font-bold text-[var(--yinn-muted)]">
-                    Menyiapkan pembayaran... Jangan tutup halaman ini.
-                  </div>
-                ) : err ? (
-                  <div>
-                    <div className="text-sm font-extrabold">Error</div>
-                    <div className="mt-1 text-sm text-[var(--yinn-muted)]">{err}</div>
-                  </div>
-                ) : (
-                  <div className="grid place-items-center">
-                    {qrImg ? (
-                      <img
-                        src={qrImg}
-                        alt="QRIS"
-                        className="rounded-2xl border border-[var(--yinn-border)]"
-                        style={{ width: 320, height: 320 }}
-                      />
-                    ) : (
-                      <div className="text-sm text-[var(--yinn-muted)]">
-                        QR belum tersedia
-                      </div>
-                    )}
-                    <div className="mt-3 text-sm font-bold">
-                      Scan QR di atas, lalu tunggu otomatis sukses.
-                    </div>
-                    <div className="mt-1 text-xs text-[var(--yinn-muted)]">
-                      Auto-check tiap 3 detik. Tombol manual juga ada.
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4 flex gap-2">
                 <button
-                  type="button"
-                  onClick={() => checkStatus().catch(() => {})}
-                  className="rounded-xl px-4 py-2 text-sm font-extrabold text-white"
+                  onClick={confirmIfCompleted}
+                  className="mt-2 w-full rounded-2xl py-3 text-sm font-extrabold text-white"
                   style={{
-                    background:
-                      "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                    background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
                   }}
-                  disabled={loading || !!err}
                 >
                   Saya sudah membayar
                 </button>
+
                 <Link
                   href="/topup"
-                  className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-2 text-sm font-bold"
+                  className="w-full rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] py-3 text-center text-sm font-bold"
                 >
                   Balik ke Deposit
                 </Link>
               </div>
-
-              {status === "completed" ? (
-                <div className="mt-3 text-sm font-extrabold text-green-500">
-                  Status: Sukses ✅
-                </div>
-              ) : null}
-            </>
-          ) : null}
+            ) : (
+              <div className="text-sm font-bold text-[var(--yinn-muted)]">
+                QR belum tersedia. Coba refresh.
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

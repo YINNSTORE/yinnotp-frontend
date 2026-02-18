@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import toast, { Toaster } from "react-hot-toast";
@@ -81,6 +81,33 @@ function formatDateTime(ts) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function shortOrderId(oid) {
+  const s = String(oid || "");
+  if (!s) return "—";
+  // contoh: YINN-1771400074856-9BC2F9 -> YINN-...-9BC2F9
+  const parts = s.split("-");
+  if (parts.length >= 3) {
+    const last = parts[parts.length - 1];
+    return `${parts[0]}-…-${last}`;
+  }
+  // fallback: potong tengah
+  if (s.length <= 14) return s;
+  return `${s.slice(0, 6)}…${s.slice(-6)}`;
+}
+
+function statusLabel(s) {
+  const v = String(s || "").toLowerCase();
+  if (v.includes("success") || v.includes("completed") || v.includes("paid")) return "Sukses";
+  if (v.includes("pending") || v.includes("wait")) return "Menunggu";
+  if (v.includes("failed") || v.includes("cancel")) return "Gagal";
+  return v ? v : "—";
+}
+
+function isPending(s) {
+  const v = String(s || "").toLowerCase();
+  return v.includes("pending") || v.includes("wait");
 }
 
 function Stepper({ step }) {
@@ -167,7 +194,6 @@ export default function TopupPage() {
   const [loadingGo, setLoadingGo] = useState(false);
 
   const presets = useMemo(() => [2000, 20000, 50000, 70000, 100000, 200000], []);
-
   const methods = useMemo(
     () => [
       {
@@ -196,18 +222,14 @@ export default function TopupPage() {
     []
   );
 
-  function pendingKey(uid) {
-    return `yinnotp_pending_deposits:${uid}`;
-  }
-  function historyKey(uid) {
-    return `yinnotp_deposit_history:${uid}`;
-  }
-  function balanceKey(uid) {
-    return `yinnotp_balance:${uid}`;
-  }
-  function lastSyncKey(uid) {
-    return `yinnotp_deposit_last_sync:${uid}`;
-  }
+  // per-user keys
+  const pendingKey = (uid) => `yinnotp_pending_deposits:${uid}`;
+  const historyKey = (uid) => `yinnotp_deposit_history:${uid}`;
+  const balanceKey = (uid) => `yinnotp_balance:${uid}`;
+  const lastSyncKey = (uid) => `yinnotp_deposit_last_sync:${uid}`;
+
+  // anti spam toast session error
+  const sessionToastOnceRef = useRef(false);
 
   function loadLocal(uid) {
     const bal = Number(String(localStorage.getItem(balanceKey(uid)) || "0").replace(/[^\d]/g, "")) || 0;
@@ -218,9 +240,11 @@ export default function TopupPage() {
     const histArr = Array.isArray(hist) ? hist : [];
     const pendingArr = Array.isArray(pending) ? pending : [];
 
-    // merge pending yang belum ada di history server
     const existingIds = new Set(histArr.map((x) => String(x?.order_id || x?.id || "")));
-    const merged = [...pendingArr.filter((p) => !existingIds.has(String(p?.order_id || ""))), ...histArr];
+    const merged = [
+      ...pendingArr.filter((p) => !existingIds.has(String(p?.order_id || ""))),
+      ...histArr,
+    ];
 
     setUser((u) => ({ ...u, balance: bal }));
     setHistory(merged);
@@ -236,17 +260,19 @@ export default function TopupPage() {
       return;
     }
     if (!uid || !token) {
-      if (showToast) toast.error("Session user tidak ketemu. Login dulu.");
+      if (showToast && !sessionToastOnceRef.current) {
+        sessionToastOnceRef.current = true;
+        toast.error("Session user tidak ketemu. Login dulu.");
+      }
       return;
     }
 
     setSyncing(true);
     try {
       const headers = authHeaders(uid, token);
-      const r = await fetch(`${backend}/deposit/me?user_id=${encodeURIComponent(uid)}`, {
-        cache: "no-store",
-        headers,
-      });
+      const url = `${backend}/deposit/me?user_id=${encodeURIComponent(uid)}`;
+
+      const r = await fetch(url, { cache: "no-store", headers });
       const t = await r.text();
       const j = safeJson(t);
 
@@ -255,16 +281,16 @@ export default function TopupPage() {
         return;
       }
 
-      // simpan server history
+      // simpan server data per-user
       localStorage.setItem(balanceKey(uid), String(j.balance || 0));
       localStorage.setItem(historyKey(uid), JSON.stringify(j.history || []));
       localStorage.setItem(lastSyncKey(uid), String(Date.now()));
 
-      // legacy (kalau masih dipakai tempat lain)
+      // legacy (kalau masih dipakai page lain)
       localStorage.setItem("yinnotp_balance", String(j.balance || 0));
       localStorage.setItem("yinnotp_deposit_history", JSON.stringify(j.history || []));
 
-      // bersihin pending yang udah completed di server
+      // bersihkan pending yang sudah ada di server history
       try {
         const pending = safeJson(localStorage.getItem(pendingKey(uid)));
         const pendingArr = Array.isArray(pending) ? pending : [];
@@ -291,13 +317,12 @@ export default function TopupPage() {
       localStorage.getItem("yinnotp_username") ||
       localStorage.getItem("username") ||
       "User";
-
     setUser((u) => ({ ...u, name: storedName }));
 
     const uid = getActiveUserId();
     if (uid) loadLocal(uid);
 
-    // sync silent pas buka halaman
+    // silent sync
     syncDeposit(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -305,9 +330,12 @@ export default function TopupPage() {
   const openDeposit = () => {
     // biar popup gak delay
     setOpen(true);
-    setAmount(2000);
-    setMethod("qris");
-    setStep(1);
+    // set nilai setelah open biar UI muncul langsung
+    setTimeout(() => {
+      setAmount(2000);
+      setMethod("qris");
+      setStep(1);
+    }, 0);
   };
 
   const goNext = () => setStep((s) => clamp(s + 1, 1, 3));
@@ -322,7 +350,9 @@ export default function TopupPage() {
     try {
       const arr = safeJson(localStorage.getItem(pendingKey(uid)));
       const list = Array.isArray(arr) ? arr : [];
-      localStorage.setItem(pendingKey(uid), JSON.stringify([item, ...list]));
+      // avoid dupe
+      const next = [item, ...list.filter((x) => String(x?.order_id || "") !== String(item?.order_id || ""))];
+      localStorage.setItem(pendingKey(uid), JSON.stringify(next));
     } catch {}
   }
 
@@ -334,7 +364,7 @@ export default function TopupPage() {
     try {
       const order_id = createOrderId();
 
-      // simpan pending lokal dulu (biar “menunggu” pasti tampil)
+      // simpan pending lokal dulu (biar "menunggu" tampil walau belum sync)
       if (uid) {
         const pendingItem = {
           order_id,
@@ -344,7 +374,6 @@ export default function TopupPage() {
           created_at: Date.now(),
         };
         addPendingLocal(uid, pendingItem);
-        // update state cepat
         setHistory((h) => [pendingItem, ...(Array.isArray(h) ? h : [])]);
       }
 
@@ -357,37 +386,40 @@ export default function TopupPage() {
     }
   };
 
-  function statusLabel(s) {
-    const v = String(s || "").toLowerCase();
-    if (v.includes("success") || v.includes("completed") || v.includes("paid")) return "Sukses";
-    if (v.includes("pending") || v.includes("wait")) return "Menunggu";
-    return v ? v : "—";
-  }
-
-  function isPending(s) {
-    const v = String(s || "").toLowerCase();
-    return v.includes("pending") || v.includes("wait");
-  }
-
   function openHistoryItem(it) {
-    const oid = String(it?.order_id || it?.id || "");
-    const amt = Number(it?.amount || it?.price || 0) || 0;
-    const m = String(it?.method || it?.payment_method || "qris");
-    if (!oid || !amt) return;
+    const uid = getActiveUserId();
+    const token = getTokenForUser(uid);
 
-    // pending -> buka halaman QR
-    if (isPending(it?.status)) {
-      router.push(`/topup/pay?method=${encodeURIComponent(m)}&amount=${amt}&order_id=${encodeURIComponent(oid)}&resume=1`);
-    } else {
-      toast("Status: " + statusLabel(it?.status));
+    // kalau token hilang, jangan langsung push (biar gak mental ke login tanpa alasan)
+    if (!uid || !token) {
+      toast.error("Session user tidak ketemu. Login dulu.");
+      router.push("/login");
+      return;
     }
+
+    const oid = String(it?.order_id || it?.id || "").trim();
+    const m = String(it?.method || it?.payment_method || "qris").trim() || "qris";
+    const amtRaw = Number(it?.amount || it?.price || 0) || 0;
+
+    if (!oid) return;
+
+    if (isPending(it?.status)) {
+      const qs = new URLSearchParams();
+      qs.set("order_id", oid);
+      qs.set("method", m);
+      if (amtRaw > 0) qs.set("amount", String(amtRaw));
+      qs.set("resume", "1");
+      router.push(`/topup/pay?${qs.toString()}`);
+      return;
+    }
+
+    toast("Status: " + statusLabel(it?.status));
   }
 
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
       <Toaster position="top-right" />
 
-      {/* TOP BAR */}
       <header className="sticky top-0 z-40 border-b border-[var(--yinn-border)] bg-[var(--yinn-surface)]">
         <div className="mx-auto flex max-w-[520px] items-center gap-3 px-4 py-3">
           <Link
@@ -412,17 +444,21 @@ export default function TopupPage() {
       </header>
 
       <main className="mx-auto max-w-[520px] px-4 pt-4 pb-[calc(120px+env(safe-area-inset-bottom))]">
-        {/* 2 cards row */}
         <section className="grid grid-cols-2 gap-3">
           <div
             className="rounded-2xl border p-4"
-            style={{ background: "var(--yinn-surface)", borderColor: "var(--yinn-border)", boxShadow: "var(--yinn-soft)" }}
+            style={{
+              background: "var(--yinn-surface)",
+              borderColor: "var(--yinn-border)",
+              boxShadow: "var(--yinn-soft)",
+            }}
           >
             <div className="flex items-start justify-between">
               <div>
                 <div className="text-[11px] font-bold tracking-wide text-[var(--yinn-muted)]">ACCOUNT</div>
                 <div className="text-sm font-extrabold">Balance Summary</div>
               </div>
+
               <button
                 onClick={() => syncDeposit(true)}
                 className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--yinn-border)]"
@@ -448,10 +484,13 @@ export default function TopupPage() {
               >
                 <Clock size={16} /> Aktifitas
               </Link>
+
               <button
                 onClick={openDeposit}
                 className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-extrabold text-white"
-                style={{ background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
+                style={{
+                  background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                }}
               >
                 <Plus size={16} /> Deposit
               </button>
@@ -460,16 +499,22 @@ export default function TopupPage() {
 
           <div
             className="rounded-2xl border p-4"
-            style={{ background: "var(--yinn-surface)", borderColor: "var(--yinn-border)", boxShadow: "var(--yinn-soft)" }}
+            style={{
+              background: "var(--yinn-surface)",
+              borderColor: "var(--yinn-border)",
+              boxShadow: "var(--yinn-soft)",
+            }}
           >
             <div className="flex items-start justify-between">
               <div className="text-sm font-extrabold">Riwayat pembayaran</div>
-              <div className="text-[11px] text-[var(--yinn-muted)]">Updated: {lastSync ? formatDateTime(lastSync) : "—"}</div>
+              <div className="text-[11px] text-[var(--yinn-muted)]">
+                Updated: {lastSync ? formatDateTime(lastSync) : "—"}
+              </div>
             </div>
 
             {history.length ? (
               <div className="mt-3 space-y-2">
-                {history.slice(0, 3).map((it) => {
+                {history.slice(0, 3).map((it, idx) => {
                   const oid = String(it?.order_id || it?.id || "");
                   const amt = Number(it?.amount || it?.price || 0) || 0;
                   const st = statusLabel(it?.status);
@@ -477,22 +522,27 @@ export default function TopupPage() {
 
                   return (
                     <button
-                      key={oid || Math.random()}
+                      key={oid || `row-${idx}`}
                       onClick={() => openHistoryItem(it)}
                       className="w-full rounded-2xl border border-[var(--yinn-border)] p-3 text-left"
                       style={{ background: "var(--yinn-surface)" }}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="text-sm font-extrabold break-words">{oid || "—"}</div>
+                          <div className="text-sm font-extrabold break-words">
+                            {shortOrderId(oid)}
+                          </div>
                           <div className="mt-1 text-[12px] text-[var(--yinn-muted)]">
-                            {String(it?.method || it?.payment_method || "qris")}{" "}
-                            {it?.created_at ? `• ${formatDateTime(it.created_at)}` : ""}
+                            {String(it?.method || it?.payment_method || "qris")}
+                            {it?.created_at ? ` • ${formatDateTime(it.created_at)}` : ""}
                             {pend ? " • klik untuk buka" : ""}
                           </div>
                         </div>
+
                         <div className="text-right">
-                          <div className="text-sm font-extrabold">Rp {amt.toLocaleString("id-ID")}</div>
+                          <div className="text-sm font-extrabold">
+                            {amt ? `Rp ${amt.toLocaleString("id-ID")}` : "—"}
+                          </div>
                           <div
                             className="mt-1 inline-flex rounded-full px-2 py-1 text-[11px] font-bold"
                             style={{
@@ -532,7 +582,6 @@ export default function TopupPage() {
           </div>
         </section>
 
-        {/* trending */}
         <section className="mt-5">
           <div className="flex items-center justify-between">
             <div className="text-sm font-extrabold">Sedang trending</div>
@@ -549,7 +598,11 @@ export default function TopupPage() {
               <div
                 key={it.name}
                 className="rounded-2xl border p-3"
-                style={{ background: "var(--yinn-surface)", borderColor: "var(--yinn-border)", boxShadow: "var(--yinn-soft)" }}
+                style={{
+                  background: "var(--yinn-surface)",
+                  borderColor: "var(--yinn-border)",
+                  boxShadow: "var(--yinn-soft)",
+                }}
               >
                 <div className="flex items-center gap-3">
                   <div className="grid h-11 w-11 place-items-center rounded-2xl border border-[var(--yinn-border)] overflow-hidden">
@@ -568,7 +621,6 @@ export default function TopupPage() {
 
       <BottomNav />
 
-      {/* MODAL */}
       <Modal
         open={open}
         onClose={() => {
@@ -593,7 +645,6 @@ export default function TopupPage() {
 
         <Stepper step={step} />
 
-        {/* STEP 1 */}
         {step === 1 && (
           <div className="mt-4">
             <div className="grid grid-cols-3 gap-2">
@@ -644,7 +695,6 @@ export default function TopupPage() {
           </div>
         )}
 
-        {/* STEP 2 */}
         {step === 2 && (
           <div className="mt-4">
             {methods.map((group) => (
@@ -689,7 +739,6 @@ export default function TopupPage() {
           </div>
         )}
 
-        {/* STEP 3 */}
         {step === 3 && (
           <div className="mt-4">
             <div className="rounded-2xl border border-[var(--yinn-border)] p-4">

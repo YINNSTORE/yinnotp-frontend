@@ -21,25 +21,26 @@ function readLastSession() {
   try {
     const raw = localStorage.getItem("yinnotp:last_session");
     if (!raw) return null;
+
     const obj = JSON.parse(raw);
     const ts = Number(obj?.ts || 0);
+
     if (!ts || Date.now() - ts > TTL) {
       localStorage.removeItem("yinnotp:last_session");
       return null;
     }
-    if (!obj?.token || !obj?.username || !obj?.email) return null;
-    return { username: obj.username, email: obj.email, token: obj.token, ts };
+
+    if (!obj?.token || !obj?.username) return null;
+    return { username: obj.username, email: obj?.email || "", token: obj.token, ts };
   } catch {
-    try {
-      localStorage.removeItem("yinnotp:last_session");
-    } catch {}
+    try { localStorage.removeItem("yinnotp:last_session"); } catch {}
     return null;
   }
 }
 
 /**
  * Simpan identitas user AKTIF + token backend
- * penting: /topup/pay & /topup page butuh yinnotp_token / last_session.token
+ * penting: /topup/pay & /topup page butuh token.
  */
 function setActiveUser(username, email, token, fallbackIdent = "") {
   const u = String(username || fallbackIdent || "").trim();
@@ -53,7 +54,11 @@ function setActiveUser(username, email, token, fallbackIdent = "") {
   if (email) localStorage.setItem("yinnotp_email", String(email));
 
   // IMPORTANT: token backend (dipakai halaman deposit/pay)
-  if (token) localStorage.setItem("yinnotp_token", String(token));
+  if (token) {
+    localStorage.setItem("yinnotp_token", String(token)); // key utama
+    localStorage.setItem("yinnotp_token_active", String(token)); // kompat
+    localStorage.setItem(`yinnotp_token:${u}`, String(token)); // per-user
+  }
 
   // clear cache GLOBAL (legacy)
   localStorage.removeItem("yinnotp_balance");
@@ -63,7 +68,7 @@ function setActiveUser(username, email, token, fallbackIdent = "") {
   try {
     localStorage.removeItem(`yinnotp_balance:${u}`);
     localStorage.removeItem(`yinnotp_deposit_history:${u}`);
-    localStorage.removeItem(`yinnotp_last_sync:${u}`);
+    localStorage.removeItem(`yinnotp_deposit_last_sync:${u}`);
   } catch {}
 }
 
@@ -78,24 +83,10 @@ export default function LoginPage() {
 
   useEffect(() => {
     // prewarm next-auth biar klik sosial cepet
-    try {
-      getCsrfToken().catch(() => {});
-    } catch {}
-    try {
-      fetch("/api/auth/providers", { cache: "no-store" }).catch(() => {});
-    } catch {}
+    try { getCsrfToken().catch(() => {}); } catch {}
+    try { fetch("/api/auth/providers", { cache: "no-store" }).catch(() => {}); } catch {}
 
-    // load saved session
     setLast(readLastSession());
-
-    (async () => {
-      try {
-        await getCsrfToken();
-      } catch {}
-      try {
-        await fetch("/api/auth/providers", { cache: "no-store" });
-      } catch {}
-    })();
   }, []);
 
   async function submitLogin(e) {
@@ -122,7 +113,6 @@ export default function LoginPage() {
         return;
       }
 
-      // fallback penting (kadang backend gak ngirim username)
       const username = String(j.data?.username || j.data?.user || "").trim() || id;
       const email = String(j.data?.email || "").trim();
       const token = String(j.data?.token || "").trim();
@@ -131,7 +121,7 @@ export default function LoginPage() {
       setActiveUser(username, email, token, id);
 
       // remember session (buat auto login)
-      if (remember && token && username && email) {
+      if (remember && token && username) {
         localStorage.setItem(
           "yinnotp:last_session",
           JSON.stringify({
@@ -230,7 +220,7 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {last?.username && last?.email ? (
+        {last?.username ? (
           <div
             className="saved-account"
             onClick={clickSaved}
@@ -241,7 +231,7 @@ export default function LoginPage() {
               <div className="avatar">{String(last.username).slice(0, 1).toUpperCase()}</div>
               <div className="account-details">
                 <p>Masuk sebagai {last.username}</p>
-                <span>{last.email}</span>
+                <span>{last.email || "-"}</span>
               </div>
             </div>
             <span style={{ fontSize: 22, fontWeight: 900, color: "var(--navy-dark)" }}>☄</span>

@@ -2,15 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Smartphone, Clock, User } from "lucide-react";
+import { Home, Wallet, Clock, User, ShoppingCart } from "lucide-react";
 
 export default function BottomNav() {
   const pathname = usePathname() || "";
 
   const items = [
     { href: "/dashboard", label: "Home", Icon: Home },
-    { href: "/order", label: "Order", Icon: Smartphone },
-    // kolom tengah buat FAB (spacer)
+    { href: "/topup", label: "Deposit", Icon: Wallet },
     { href: "/dashboard/activity", label: "Activity", Icon: Clock },
     { href: "/dashboard/profile", label: "Profile", Icon: User },
   ];
@@ -20,23 +19,26 @@ export default function BottomNav() {
     return pathname.startsWith(href);
   };
 
+  const fabActive = pathname.startsWith("/order");
+
   return (
     <nav
       aria-label="Bottom navigation"
       className="fixed inset-x-0 bottom-0 z-50"
       style={{
         padding: "10px 12px calc(10px + env(safe-area-inset-bottom))",
-        background: "rgba(255,255,255,.82)",
-        backdropFilter: "blur(10px)",
-        borderTop: "1px solid rgba(15,23,42,.08)",
+        background: "transparent",
       }}
     >
       <div
         className="mx-auto max-w-[520px] rounded-[18px] px-2 py-2"
         style={{
-          background: "rgba(255,255,255,.92)",
-          boxShadow: "0 14px 34px rgba(2,6,23,.12)",
+          background: "var(--yinn-surface)",
+          border: "1px solid var(--yinn-border)",
+          boxShadow: "var(--yinn-soft)",
           position: "relative",
+          backdropFilter: "blur(10px)",
+          WebkitBackdropFilter: "blur(10px)",
         }}
       >
         <div className="grid grid-cols-5 items-center gap-1">
@@ -94,10 +96,10 @@ export default function BottomNav() {
           ))}
         </div>
 
-        {/* FAB tengah */}
+        {/* FAB tengah: Beli OTP + keranjang */}
         <Link
           href="/order"
-          aria-label="Buat order OTP"
+          aria-label="Beli OTP"
           className="grid place-items-center"
           style={{
             position: "absolute",
@@ -110,13 +112,16 @@ export default function BottomNav() {
             background:
               "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
             boxShadow: "0 16px 34px rgba(67,97,238,.32)",
-            border: "1px solid rgba(255,255,255,.35)",
+            border: fabActive
+              ? "2px solid rgba(255,255,255,.75)"
+              : "1px solid rgba(255,255,255,.35)",
             color: "white",
           }}
         >
-          <span style={{ fontSize: 20, transform: "translateY(-1px)" }}>
-            ☄𔓎
-          </span>
+          <div className="flex flex-col items-center justify-center leading-none">
+            <ShoppingCart size={22} />
+            <span className="mt-1 text-[10px] font-extrabold">OTP</span>
+          </div>
         </Link>
       </div>
     </nav>

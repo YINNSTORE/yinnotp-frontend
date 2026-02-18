@@ -21,14 +21,24 @@ function readLastSession() {
   try {
     const raw = localStorage.getItem("yinnotp:last_session");
     if (!raw) return null;
+
     const obj = JSON.parse(raw);
     const ts = Number(obj?.ts || 0);
+
     if (!ts || Date.now() - ts > TTL) {
       localStorage.removeItem("yinnotp:last_session");
       return null;
     }
-    if (!obj?.token || !obj?.username || !obj?.email) return null;
-    return { username: obj.username, email: obj.email, token: obj.token, ts };
+
+    // ✅ email opsional, jangan bikin session invalid gara-gara email kosong
+    if (!obj?.token || !obj?.username) return null;
+
+    return {
+      username: String(obj.username || ""),
+      email: String(obj.email || ""),
+      token: String(obj.token || ""),
+      ts,
+    };
   } catch {
     try {
       localStorage.removeItem("yinnotp:last_session");
@@ -50,7 +60,7 @@ function setActiveUser(username, email, token, fallbackIdent = "") {
   localStorage.setItem("yinnotp_user_id", u);
   localStorage.setItem("yinnotp_username", u);
   localStorage.setItem("yinnotp_name", u);
-  if (email) localStorage.setItem("yinnotp_email", String(email));
+  if (email !== undefined && email !== null) localStorage.setItem("yinnotp_email", String(email || ""));
 
   // IMPORTANT: token backend (dipakai halaman deposit/pay)
   if (token) {
@@ -90,7 +100,6 @@ export default function LoginPage() {
       fetch("/api/auth/providers", { cache: "no-store" }).catch(() => {});
     } catch {}
 
-    // load saved session
     setLast(readLastSession());
 
     (async () => {
@@ -123,13 +132,20 @@ export default function LoginPage() {
       const j = safeJson(t);
 
       if (!r.ok || !j.ok) {
-        // biar spesifik: pakai message dari backend
-        toast.error(j.message || "Login gagal (server error)");
+        const msg = String(j?.message || "");
+        // ✅ lebih spesifik (tanpa ngarang)
+        if (r.status === 401 || /password|sandi|credentials/i.test(msg)) {
+          toast.error(msg || "Password salah / kredensial salah");
+        } else if (r.status >= 500) {
+          toast.error(msg || "Login gagal: server error (5xx)");
+        } else {
+          toast.error(msg || `Login gagal (HTTP ${r.status})`);
+        }
         return;
       }
 
       const username = String(j.data?.username || j.data?.user || "").trim() || id;
-      const email = String(j.data?.email || "").trim();
+      const email = String(j.data?.email || "").trim(); // boleh kosong
       const token = String(j.data?.token || "").trim();
 
       if (!token) {
@@ -139,12 +155,14 @@ export default function LoginPage() {
 
       setActiveUser(username, email, token, id);
 
-      if (remember && token && username && email) {
-        localStorage.setItem(
-          "yinnotp:last_session",
-          JSON.stringify({ username, email, token, ts: Date.now() })
-        );
-        setLast({ username, email, token, ts: Date.now() });
+      // ✅ remember walau email kosong
+      if (remember && token && username) {
+        const payload = { username, email: email || "", token, ts: Date.now() };
+        localStorage.setItem("yinnotp:last_session", JSON.stringify(payload));
+        setLast(payload);
+      } else {
+        // kalau gak remember, minimal setLast biar UI bisa
+        setLast({ username, email: email || "", token, ts: Date.now() });
       }
 
       toast.success("Login berhasil");
@@ -183,7 +201,7 @@ export default function LoginPage() {
       }
 
       // set active user + token
-      setActiveUser(cur.username, cur.email, cur.token, cur.username);
+      setActiveUser(cur.username, cur.email || "", cur.token, cur.username);
 
       toast.success("Auto login berhasil");
       window.location.replace(DASHBOARD_URL);
@@ -221,13 +239,14 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {last?.username && last?.email ? (
+        {/* ✅ tampil walau email kosong */}
+        {last?.username ? (
           <div className="saved-account" onClick={clickSaved} role="button" title="Klik untuk auto login">
             <div className="account-info">
               <div className="avatar">{String(last.username).slice(0, 1).toUpperCase()}</div>
               <div className="account-details">
                 <p>Masuk sebagai {last.username}</p>
-                <span>{last.email}</span>
+                <span>{last.email ? last.email : "—"}</span>
               </div>
             </div>
             <span style={{ fontSize: 22, fontWeight: 900, color: "var(--navy-dark)" }}>☄</span>

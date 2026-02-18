@@ -10,18 +10,10 @@ const TTL = 12 * 60 * 60 * 1000;
 function safeJson(text) {
   try {
     if (!text) return null;
-    const t = String(text).trim();
-    if (t.startsWith("<!DOCTYPE") || t.startsWith("<html") || t.startsWith("<HTML")) return null;
-    return JSON.parse(t);
+    return JSON.parse(text);
   } catch {
     return null;
   }
-}
-
-function normBackend(url) {
-  const u = String(url || "").trim();
-  if (!u) return "";
-  return u.endsWith("/") ? u.slice(0, -1) : u;
 }
 
 function readLastSession() {
@@ -31,57 +23,49 @@ function readLastSession() {
     const obj = JSON.parse(raw);
     const ts = Number(obj?.ts || 0);
     if (!ts || Date.now() - ts > TTL) return null;
-    return obj;
+    if (!obj?.token) return null;
+    // ✅ username/email boleh kosong
+    return {
+      username: String(obj?.username || ""),
+      email: String(obj?.email || ""),
+      token: String(obj?.token || ""),
+      ts,
+    };
   } catch {
     return null;
   }
 }
 
-function pickUidTokenFromStorage() {
-  const last = readLastSession();
-
-  // UID: coba semua key yang mungkin
-  const uid =
-    localStorage.getItem("yinnotp_active_user") ||
-    localStorage.getItem("yinnotp_user_id") ||
-    localStorage.getItem("yinnotp_username") ||
-    localStorage.getItem("user_id") ||
-    localStorage.getItem("username") ||
-    last?.username ||
-    "";
-
-  // TOKEN: coba semua key yang mungkin
-  const token =
-    localStorage.getItem("yinnotp_token") ||
-    localStorage.getItem("yinnotp_token_active") ||
-    localStorage.getItem("token") ||
-    last?.token ||
-    "";
-
-  return {
-    uid: String(uid || "").trim(),
-    token: String(token || "").trim(),
-    email: String(last?.email || "").trim(),
-  };
+function getActiveUserIdLoose() {
+  try {
+    // ✅ ambil dari semua key yang mungkin ada
+    return (
+      localStorage.getItem("yinnotp_active_user") ||
+      localStorage.getItem("yinnotp_user_id") ||
+      localStorage.getItem("yinnotp_username") ||
+      localStorage.getItem("yinnotp_name") ||
+      localStorage.getItem("user_id") ||
+      localStorage.getItem("username") ||
+      readLastSession()?.username ||
+      ""
+    );
+  } catch {
+    return "";
+  }
 }
 
-function rehydrateSessionIfFound() {
+function getTokenLoose(uid) {
   try {
-    const { uid, token, email } = pickUidTokenFromStorage();
-    if (uid) {
-      localStorage.setItem("yinnotp_user_id", uid);
-      localStorage.setItem("yinnotp_username", uid);
-      localStorage.setItem("yinnotp_active_user", uid);
-      localStorage.setItem("yinnotp_name", uid);
-    }
-    if (email) localStorage.setItem("yinnotp_email", email);
-    if (token) {
-      localStorage.setItem("yinnotp_token", token);
-      localStorage.setItem("yinnotp_token_active", token);
-    }
-    return { uid, token };
+    const s = readLastSession();
+    return (
+      localStorage.getItem("yinnotp_token") ||
+      localStorage.getItem("yinnotp_token_active") ||
+      (uid ? localStorage.getItem(`yinnotp_token:${uid}`) : "") ||
+      s?.token ||
+      ""
+    );
   } catch {
-    return { uid: "", token: "" };
+    return "";
   }
 }
 
@@ -95,12 +79,74 @@ function authHeaders(uid, token) {
   return h;
 }
 
-function normalizeStatus(raw) {
+function normalizeStatus(obj) {
+  const raw =
+    obj?.status ??
+    obj?.data?.status ??
+    obj?.payment?.status ??
+    obj?.data?.payment?.status ??
+    obj?.result?.status ??
+    obj?.data?.result?.status ??
+    "";
+
   const s = String(raw || "").toLowerCase();
+
   if (["paid", "success", "sukses", "completed", "settlement", "done"].includes(s)) return "completed";
   if (["pending", "process", "processing", "menunggu", "unpaid", "waiting"].includes(s)) return "pending";
   if (["expire", "expired", "failed", "cancel", "canceled", "cancelled"].includes(s)) return "failed";
   return s || "unknown";
+}
+
+function pickPaymentNumber(obj) {
+  return (
+    obj?.payment_number ||
+    obj?.data?.payment_number ||
+    obj?.payment?.payment_number ||
+    obj?.data?.payment?.payment_number ||
+    obj?.payment?.qr_string ||
+    obj?.data?.payment?.qr_string ||
+    obj?.qr_string ||
+    obj?.data?.qr_string ||
+    obj?.qr ||
+    obj?.data?.qr ||
+    obj?.qris ||
+    obj?.data?.qris ||
+    ""
+  );
+}
+
+function pickMeta(obj) {
+  const amount = obj?.amount ?? obj?.data?.amount ?? obj?.payment?.amount ?? obj?.data?.payment?.amount ?? 0;
+  const total =
+    obj?.total_payment ??
+    obj?.data?.total_payment ??
+    obj?.payment?.total_payment ??
+    obj?.data?.payment?.total_payment ??
+    amount;
+
+  const fee = obj?.fee ?? obj?.data?.fee ?? obj?.payment?.fee ?? obj?.data?.payment?.fee ?? 0;
+
+  const created =
+    obj?.created_at ??
+    obj?.data?.created_at ??
+    obj?.payment?.created_at ??
+    obj?.data?.payment?.created_at ??
+    0;
+
+  const exp =
+    obj?.expired_at ??
+    obj?.data?.expired_at ??
+    obj?.payment?.expired_at ??
+    obj?.data?.payment?.expired_at ??
+    0;
+
+  return {
+    amount: Number(amount || 0) || 0,
+    total: Number(total || 0) || 0,
+    fee: Number(fee || 0) || 0,
+    created_at: Number(created || 0) || 0,
+    expired_at: Number(exp || 0) || 0,
+  };
 }
 
 function formatIDR(n) {
@@ -111,128 +157,88 @@ function formatIDR(n) {
   }).format(Number(n || 0));
 }
 
-function fmtDate(ts) {
+function formatDateTime(ts) {
   if (!ts) return "—";
-  const num = Number(ts);
-  const d = new Date(String(ts).length <= 10 ? num * 1000 : num);
-  return d.toLocaleString("id-ID", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const d = new Date(ts * 1000 || ts); // support seconds / ms
+  return d.toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+async function qrDataUrlFromString(qrString) {
+  const QRCode = (await import("qrcode")).default;
+  return await QRCode.toDataURL(qrString, { errorCorrectionLevel: "M", margin: 1, scale: 8 });
 }
 
 export default function PayClient() {
   const sp = useSearchParams();
   const router = useRouter();
+  const timerRef = useRef(null);
+  const confirmingRef = useRef(false);
 
-  const backend = normBackend(process.env.NEXT_PUBLIC_BACKEND_URL);
+  const backend = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
   const order_id = sp.get("order_id") || "";
-  const resume = sp.get("resume") === "1";
+  const method = sp.get("method") || "qris";
+  const amountQ = Number(sp.get("amount") || 0) || 0;
 
-  const qpAmount = Number(sp.get("amount") || 0) || 0;
-
+  // ✅ session disimpan di state, dibaca ulang pas mount (biar refresh aman)
   const [uid, setUid] = useState("");
   const [token, setToken] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  const [qr, setQr] = useState("");
   const [status, setStatus] = useState("pending");
-
-  const [amount, setAmount] = useState(qpAmount);
+  const [amount, setAmount] = useState(amountQ);
+  const [total, setTotal] = useState(amountQ);
   const [fee, setFee] = useState(0);
-  const [total, setTotal] = useState(qpAmount);
+  const [createdAt, setCreatedAt] = useState(0);
+  const [expiredAt, setExpiredAt] = useState(0);
 
-  const [createdAt, setCreatedAt] = useState(null);
-  const [expiredAt, setExpiredAt] = useState(null);
-
-  const confirmedRef = useRef(false);
-  const timerRef = useRef(null);
+  const [qrString, setQrString] = useState("");
+  const [qrUrl, setQrUrl] = useState("");
 
   const cacheKey = useMemo(() => (uid && order_id ? `deposit_qr:${uid}:${order_id}` : ""), [uid, order_id]);
-  const metaKey = useMemo(() => (uid && order_id ? `deposit_meta:${uid}:${order_id}` : ""), [uid, order_id]);
 
-  function stopPolling() {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
+  function stopAuto() {
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = null;
   }
 
-  async function fetchAnyJson(url, opt) {
-    const r = await fetch(url, opt);
-    const t = await r.text();
-    const j = safeJson(t);
-    return { r, t, j };
+  function startAuto() {
+    stopAuto();
+    timerRef.current = setInterval(() => checkNow(true), 3000);
   }
 
-  function pickFromDetail(d) {
-    const st = normalizeStatus(d?.status || d?.data?.status || d?.payment?.status || d?.data?.payment?.status);
+  // ✅ baca session pas mount + tiap balik dari login
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const u = getActiveUserIdLoose();
+    const t = getTokenLoose(u);
+    setUid(String(u || ""));
+    setToken(String(t || ""));
+  }, []);
 
-    const amt =
-      Number(d?.amount || d?.data?.amount || d?.payment?.amount || d?.data?.payment?.amount || amount || 0) || 0;
-
-    const feeV =
-      Number(d?.fee || d?.data?.fee || d?.payment?.fee || d?.data?.payment?.fee || 0) || 0;
-
-    const totalV =
-      Number(
-        d?.total_payment ||
-          d?.data?.total_payment ||
-          d?.payment?.total_payment ||
-          d?.data?.payment?.total_payment ||
-          (amt + feeV)
-      ) || 0;
-
-    const qrV =
-      d?.qr ||
-      d?.qr_image ||
-      d?.qr_url ||
-      d?.data?.qr ||
-      d?.data?.qr_image ||
-      d?.data?.qr_url ||
-      d?.payment?.qr ||
-      d?.payment?.qr_image ||
-      d?.payment?.qr_url ||
-      d?.data?.payment?.qr ||
-      "";
-
-    const created =
-      d?.created_at || d?.data?.created_at || d?.payment?.created_at || d?.data?.payment?.created_at || null;
-
-    const expired =
-      d?.expired_at || d?.data?.expired_at || d?.payment?.expired_at || d?.data?.payment?.expired_at || null;
-
-    return { st, amt, feeV, totalV, qrV, created, expired };
-  }
-
-  async function getDetail() {
+  async function fetchDetail(u, t) {
     if (!backend) throw new Error("Backend URL belum diset");
     if (!order_id) throw new Error("Order ID kosong");
-    if (!uid || !token) throw new Error("Session user tidak ketemu. Login dulu.");
+    if (!u || !t) throw new Error("Session user tidak ketemu. Login dulu.");
 
+    const headers = authHeaders(u, t);
+
+    // ✅ fallback endpoint: /deposit/detail , /deposit/detail.php
     const urls = [
-      `${backend}/deposit/detail?order_id=${encodeURIComponent(order_id)}&user_id=${encodeURIComponent(uid)}`,
-      `${backend}/deposit/detail.php?order_id=${encodeURIComponent(order_id)}&user_id=${encodeURIComponent(uid)}`,
+      `${backend}/deposit/detail?order_id=${encodeURIComponent(order_id)}&user_id=${encodeURIComponent(u)}`,
+      `${backend}/deposit/detail.php?order_id=${encodeURIComponent(order_id)}&user_id=${encodeURIComponent(u)}`,
     ];
 
     let lastErr = null;
     for (const url of urls) {
       try {
-        const { r, j } = await fetchAnyJson(url, { cache: "no-store", headers: authHeaders(uid, token) });
-        if (!r.ok || !j) {
-          lastErr = new Error(`Detail invalid (HTTP ${r.status})`);
-          continue;
-        }
-        if (j?.ok === false) {
-          lastErr = new Error(String(j?.message || "Detail gagal"));
-          continue;
-        }
+        const r = await fetch(url, { cache: "no-store", headers });
+        const ttxt = await r.text();
+        const j = safeJson(ttxt);
+        if (!r.ok || !j) throw new Error("Pakasir response tidak sesuai");
+        if (j?.ok === false) throw new Error(String(j?.message || "Pakasir response tidak sesuai"));
         return j;
       } catch (e) {
         lastErr = e;
@@ -241,159 +247,228 @@ export default function PayClient() {
     throw lastErr || new Error("Pakasir response tidak sesuai");
   }
 
-  async function confirmDeposit() {
-    if (confirmedRef.current) return;
-    confirmedRef.current = true;
+  async function createTx(u, t) {
+    if (!backend) throw new Error("Backend URL belum diset");
+    if (!u || !t) throw new Error("Session user tidak ketemu. Login dulu.");
 
-    const urls = [`${backend}/deposit/confirm`, `${backend}/deposit/confirm.php`];
+    const headers = authHeaders(u, t);
+
+    // ✅ fallback endpoint: /deposit/create , /deposit/create.php
+    const urls = [`${backend}/deposit/create`, `${backend}/deposit/create.php`];
+
+    let lastErr = null;
+    for (const url of urls) {
+      try {
+        const r = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ user_id: u, order_id, amount: amount || amountQ || 2000, method }),
+        });
+        const ttxt = await r.text();
+        const j = safeJson(ttxt);
+        if (!r.ok || !j) throw new Error("Create payment gagal (response invalid)");
+        if (j?.ok === false) throw new Error(String(j?.message || "Create payment gagal"));
+        return j;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("Create payment gagal");
+  }
+
+  async function confirmDeposit(u, t) {
+    if (confirmingRef.current) return;
+    confirmingRef.current = true;
 
     try {
+      const headers = authHeaders(u, t);
+      const urls = [`${backend}/deposit/confirm`, `${backend}/deposit/confirm.php`];
+
       let ok = false;
+      let lastErr = null;
+
       for (const url of urls) {
-        const { r, j } = await fetchAnyJson(url, {
-          method: "POST",
-          headers: authHeaders(uid, token),
-          body: JSON.stringify({ user_id: uid, order_id }),
-        });
-        if (r.ok && j?.ok) {
+        try {
+          const r = await fetch(url, { method: "POST", headers, body: JSON.stringify({ user_id: u, order_id }) });
+          const ttxt = await r.text();
+          const j = safeJson(ttxt);
+          if (!r.ok || !j) throw new Error("Confirm gagal");
+          if (j?.ok === false) throw new Error(String(j?.message || "Confirm gagal"));
           ok = true;
           break;
+        } catch (e) {
+          lastErr = e;
         }
       }
-      if (!ok) throw new Error("Gagal konfirmasi deposit");
 
-      toast.success("Deposit sukses ✅", { id: "dep-ok" });
-      stopPolling();
-      router.replace("/topup");
+      if (!ok) throw lastErr || new Error("Confirm gagal");
+
+      toast.success("Deposit sukses ✅");
+      router.replace("/topup"); // balik ke deposit/home
     } catch (e) {
-      confirmedRef.current = false;
-      toast.error(String(e?.message || "Gagal konfirmasi deposit"), { id: "dep-confirm-fail" });
+      confirmingRef.current = false;
+      toast.error(String(e?.message || "Gagal konfirmasi deposit"));
     }
   }
 
-  async function ensureLoaded() {
+  async function ensureQR(u, t) {
     setErr("");
     setLoading(true);
 
     try {
-      // restore cache biar refresh aman
-      if (resume && cacheKey) {
-        const cachedQR = localStorage.getItem(cacheKey);
-        if (cachedQR) setQr(cachedQR);
-      }
-      if (resume && metaKey) {
-        const m = safeJson(localStorage.getItem(metaKey));
-        if (m?.amount) setAmount(Number(m.amount) || 0);
-        if (m?.fee != null) setFee(Number(m.fee) || 0);
-        if (m?.total) setTotal(Number(m.total) || 0);
-        if (m?.createdAt) setCreatedAt(m.createdAt);
-        if (m?.expiredAt) setExpiredAt(m.expiredAt);
+      // 1) detail dulu
+      let d = null;
+      try {
+        d = await fetchDetail(u, t);
+      } catch {
+        d = null;
       }
 
-      const d = await getDetail();
-      const p = pickFromDetail(d);
+      if (d) {
+        const st = normalizeStatus(d);
+        setStatus(st);
 
-      setStatus(p.st);
-      if (p.amt) setAmount(p.amt);
-      setFee(p.feeV || 0);
-      setTotal(p.totalV || (p.amt + p.feeV));
-      setCreatedAt(p.created);
-      setExpiredAt(p.expired);
+        const meta = pickMeta(d);
+        if (meta.amount) setAmount(meta.amount);
+        if (meta.total) setTotal(meta.total);
+        if (meta.fee !== undefined) setFee(meta.fee);
+        if (meta.created_at) setCreatedAt(meta.created_at);
+        if (meta.expired_at) setExpiredAt(meta.expired_at);
 
-      if (p.qrV) {
-        setQr(String(p.qrV));
-        if (cacheKey) localStorage.setItem(cacheKey, String(p.qrV));
+        const pn = pickPaymentNumber(d);
+        if (pn) {
+          setQrString(pn);
+          const dataUrl = await qrDataUrlFromString(pn);
+          setQrUrl(dataUrl);
+          if (cacheKey) localStorage.setItem(cacheKey, pn);
+          setLoading(false);
+          return true;
+        }
       }
 
-      if (metaKey) {
-        localStorage.setItem(
-          metaKey,
-          JSON.stringify({
-            amount: p.amt,
-            fee: p.feeV,
-            total: p.totalV || (p.amt + p.feeV),
-            createdAt: p.created,
-            expiredAt: p.expired,
-          })
-        );
-      }
+      // 2) kalau belum ada payment_number -> create
+      const c = await createTx(u, t);
+      const st2 = normalizeStatus(c);
+      setStatus(st2);
+
+      const meta2 = pickMeta(c);
+      if (meta2.amount) setAmount(meta2.amount);
+      if (meta2.total) setTotal(meta2.total);
+      if (meta2.fee !== undefined) setFee(meta2.fee);
+      if (meta2.created_at) setCreatedAt(meta2.created_at);
+      if (meta2.expired_at) setExpiredAt(meta2.expired_at);
+
+      const pn2 = pickPaymentNumber(c);
+      if (!pn2) throw new Error("QRIS string kosong dari backend");
+
+      setQrString(pn2);
+      const dataUrl2 = await qrDataUrlFromString(pn2);
+      setQrUrl(dataUrl2);
+      if (cacheKey) localStorage.setItem(cacheKey, pn2);
 
       setLoading(false);
-
-      if (p.st === "completed") {
-        await confirmDeposit();
-      }
+      return true;
     } catch (e) {
       setLoading(false);
-      setErr(String(e?.message || "Pakasir response tidak sesuai"));
+      setErr(String(e?.message || "Error"));
+      return false;
     }
   }
 
-  async function pollOnce() {
+  async function checkNow(silent = false) {
     try {
-      const d = await getDetail();
-      const p = pickFromDetail(d);
-      if (p.st) setStatus(p.st);
+      if (!uid || !token) return false;
 
-      if (p.st === "completed") {
-        await confirmDeposit();
+      const d = await fetchDetail(uid, token);
+      const st = normalizeStatus(d);
+      setStatus(st);
+
+      const meta = pickMeta(d);
+      if (meta.amount) setAmount(meta.amount);
+      if (meta.total) setTotal(meta.total);
+      if (meta.fee !== undefined) setFee(meta.fee);
+      if (meta.created_at) setCreatedAt(meta.created_at);
+      if (meta.expired_at) setExpiredAt(meta.expired_at);
+
+      if (st === "completed") {
+        await confirmDeposit(uid, token);
+        return true;
       }
-    } catch {
-      // silent
+
+      if (!silent) toast(st === "pending" ? "Masih pending…" : `Status: ${st}`);
+      return true;
+    } catch (e) {
+      if (!silent) toast.error(String(e?.message || "Gagal cek status"));
+      return false;
     }
   }
 
   async function downloadQR() {
     try {
-      if (!qr) return toast.error("QR belum siap");
+      if (!qrUrl) return toast.error("QR belum siap");
       const a = document.createElement("a");
-      a.href = qr;
+      a.href = qrUrl;
       a.download = `${order_id || "qris"}.png`;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      toast.success("QRIS berhasil didownload ✅");
+      toast.success("QRIS didownload ✅");
     } catch {
       toast.error("Gagal download");
     }
   }
 
-  function reloadSessionAndRetry() {
-    const s = rehydrateSessionIfFound();
-    setUid(s.uid);
-    setToken(s.token);
-    if (!s.uid || !s.token) {
-      setErr("Session user tidak ketemu. Login dulu.");
-      return;
-    }
-    ensureLoaded();
-  }
-
+  // MAIN FLOW
   useEffect(() => {
     if (!order_id) {
       router.replace("/topup");
       return;
     }
 
-    // ambil session + rehydrate supaya konsisten
-    const s = rehydrateSessionIfFound();
-    setUid(s.uid);
-    setToken(s.token);
+    // ✅ kalau refresh, baca ulang session SEKARANG (biar gak ngandelin memo lama)
+    const u = typeof window === "undefined" ? "" : getActiveUserIdLoose();
+    const t = typeof window === "undefined" ? "" : getTokenLoose(u);
+    if (u && t) {
+      setUid(u);
+      setToken(t);
+    }
+  }, [order_id, router]);
 
-    if (!s.uid || !s.token) {
+  useEffect(() => {
+    if (!order_id) return;
+
+    if (!uid || !token) {
       setLoading(false);
       setErr("Session user tidak ketemu. Login dulu.");
+      stopAuto();
       return;
     }
 
-    ensureLoaded();
+    // kalau ada cache QR string, render cepat
+    if (cacheKey) {
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached && !qrString) {
+          setQrString(cached);
+          qrDataUrlFromString(cached).then(setQrUrl).catch(() => {});
+        }
+      } catch {}
+    }
 
-    stopPolling();
-    timerRef.current = setInterval(() => pollOnce(), 3000);
+    let mounted = true;
 
-    return () => stopPolling();
+    (async () => {
+      const ok = await ensureQR(uid, token);
+      if (!mounted) return;
+      if (ok) startAuto();
+    })();
+
+    return () => {
+      mounted = false;
+      stopAuto();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order_id]);
+  }, [uid, token, order_id]);
 
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)] px-4 py-8">
@@ -408,18 +483,20 @@ export default function PayClient() {
           </div>
 
           <div className="text-sm text-[var(--yinn-muted)]">
-            Nominal: <span className="font-semibold">{formatIDR(amount)}</span>
+            Nominal: <span className="font-semibold">{formatIDR(amount || amountQ)}</span>
           </div>
+
           <div className="text-sm text-[var(--yinn-muted)]">
             Fee: <span className="font-semibold">{formatIDR(fee)}</span>
           </div>
+
           <div className="text-sm text-[var(--yinn-muted)]">
-            Total: <span className="font-semibold">{formatIDR(total || (amount + fee))}</span>
+            Total: <span className="font-semibold">{formatIDR(total || amountQ)}</span>
           </div>
 
-          <div className="mt-2 grid grid-cols-2 gap-2 text-[12px] text-[var(--yinn-muted)]">
-            <div>Dibuat: <span className="font-semibold">{createdAt ? fmtDate(createdAt) : "—"}</span></div>
-            <div className="text-right">Expired: <span className="font-semibold">{expiredAt ? fmtDate(expiredAt) : "—"}</span></div>
+          <div className="mt-2 flex items-center justify-between text-xs text-[var(--yinn-muted)]">
+            <span>Dibuat: {createdAt ? formatDateTime(createdAt) : "—"}</span>
+            <span>Expired: {expiredAt ? formatDateTime(expiredAt) : "—"}</span>
           </div>
 
           <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] p-4">
@@ -427,42 +504,74 @@ export default function PayClient() {
               <>
                 <div className="text-sm font-extrabold">Gagal</div>
                 <div className="mt-1 text-sm text-[var(--yinn-muted)]">{err}</div>
+
                 <div className="mt-3 flex gap-2">
                   <button
-                    onClick={reloadSessionAndRetry}
+                    onClick={() => {
+                      // coba re-read session (buat kasus user baru login di tab lain)
+                      const u = getActiveUserIdLoose();
+                      const t = getTokenLoose(u);
+                      setUid(u);
+                      setToken(t);
+                      setErr("");
+                      setLoading(true);
+                    }}
                     className="rounded-xl px-4 py-2 text-sm font-extrabold text-white"
                     style={{ background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
                   >
                     Coba lagi
                   </button>
-                  <Link
-                    href="/topup"
-                    className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-2 text-sm font-bold"
-                  >
+
+                  <Link href="/topup" className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-2 text-sm font-bold">
                     Balik
                   </Link>
-                  <Link
-                    href="/login"
-                    className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-2 text-sm font-bold"
-                  >
+
+                  <Link href="/login" className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-2 text-sm font-bold">
                     Login
                   </Link>
                 </div>
               </>
             ) : loading ? (
               <div className="text-sm font-bold text-[var(--yinn-muted)]">Menyiapkan pembayaran…</div>
-            ) : qr ? (
-              <div className="grid place-items-center gap-3">
-                <div className="text-sm font-bold">Scan QR di bawah</div>
-                <div className="rounded-2xl border border-[var(--yinn-border)] bg-white p-3">
-                  <img src={qr} alt="QRIS" className="h-[240px] w-[240px]" />
+            ) : qrUrl ? (
+              <>
+                {/* HOLOGRAM SIMPLE (BRIMO-LIKE FEEL) */}
+                <div
+                  className="relative overflow-hidden rounded-2xl border border-[var(--yinn-border)] p-4"
+                  style={{
+                    background:
+                      "radial-gradient(900px 260px at 20% 10%, rgba(99,102,241,.18), transparent 60%), radial-gradient(900px 260px at 85% 30%, rgba(56,189,248,.16), transparent 55%), linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,0))",
+                  }}
+                >
+                  <div
+                    className="pointer-events-none absolute inset-0 opacity-70"
+                    style={{
+                      background:
+                        "linear-gradient(120deg, rgba(0,255,255,.10), rgba(255,0,255,.10), rgba(255,255,0,.08)), radial-gradient(800px 200px at 30% 25%, rgba(255,255,255,.20), transparent 55%)",
+                      mixBlendMode: "screen",
+                    }}
+                  />
+                  <div
+                    className="pointer-events-none absolute -inset-24 opacity-35"
+                    style={{
+                      background:
+                        "repeating-linear-gradient(45deg, rgba(255,255,255,.18) 0px, rgba(255,255,255,.18) 2px, transparent 2px, transparent 12px)",
+                      transform: "rotate(10deg)",
+                    }}
+                  />
+
+                  <div className="relative grid place-items-center">
+                    <div className="rounded-2xl bg-white p-4 shadow-[0_20px_60px_rgba(2,6,23,.18)]">
+                      <img src={qrUrl} alt="QRIS" className="block h-auto w-[280px] max-w-full" style={{ imageRendering: "pixelated" }} />
+                    </div>
+                  </div>
                 </div>
 
-                <div className="text-xs text-[var(--yinn-muted)]">
-                  Status: <span className="font-semibold">{String(status).toUpperCase()}</span> • auto-check 3 detik
+                <div className="mt-3 text-xs text-[var(--yinn-muted)]">
+                  Status: <span className="font-bold">{String(status).toUpperCase()}</span> • auto-check 3 detik
                 </div>
 
-                <div className="grid w-full grid-cols-2 gap-2">
+                <div className="mt-3 grid grid-cols-2 gap-2">
                   <button
                     onClick={downloadQR}
                     className="rounded-xl px-4 py-3 text-sm font-extrabold text-white"
@@ -472,20 +581,29 @@ export default function PayClient() {
                   </button>
 
                   <button
-                    onClick={confirmDeposit}
+                    onClick={() => checkNow(false)}
                     className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-3 text-sm font-extrabold"
                   >
-                    Saya sudah membayar
+                    Cek sekarang
                   </button>
                 </div>
 
-                <Link
-                  href="/topup"
-                  className="w-full rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] py-3 text-center text-sm font-bold"
-                >
-                  Balik ke Deposit
-                </Link>
-              </div>
+                <div className="mt-2">
+                  <Link
+                    href="/topup"
+                    className="block rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-3 text-center text-sm font-bold"
+                  >
+                    Balik ke Deposit
+                  </Link>
+                </div>
+
+                {/* debug kecil biar gampang kalau ada masalah */}
+                {qrString ? (
+                  <div className="mt-3 rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3 text-[11px] text-[var(--yinn-muted)]">
+                    QR Raw: {qrString.slice(0, 80)}{qrString.length > 80 ? "…" : ""}
+                  </div>
+                ) : null}
+              </>
             ) : (
               <div className="text-sm font-bold text-[var(--yinn-muted)]">QR belum tersedia. Coba lagi.</div>
             )}

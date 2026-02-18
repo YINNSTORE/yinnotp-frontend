@@ -8,6 +8,15 @@ import { signIn, getCsrfToken } from "next-auth/react";
 const TTL = 12 * 60 * 60 * 1000;
 const DASHBOARD_URL = "/dashboard";
 
+function safeJson(text) {
+  try {
+    if (!text) return {};
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
 function readLastSession() {
   try {
     const raw = localStorage.getItem("yinnotp:last_session");
@@ -28,19 +37,34 @@ function readLastSession() {
   }
 }
 
-function setActiveUser(username, email) {
-  if (!username) return;
+/**
+ * Simpan identitas user AKTIF + token backend
+ * penting: /topup/pay & /topup page butuh yinnotp_token / last_session.token
+ */
+function setActiveUser(username, email, token, fallbackIdent = "") {
+  const u = String(username || fallbackIdent || "").trim();
+  if (!u) return;
 
-  // set active identity (biar /topup/pay gak nyasar)
-  localStorage.setItem("yinnotp_active_user", username);
-  localStorage.setItem("yinnotp_user_id", username);
-  localStorage.setItem("yinnotp_username", username);
-  localStorage.setItem("yinnotp_name", username);
-  if (email) localStorage.setItem("yinnotp_email", email);
+  // active identity
+  localStorage.setItem("yinnotp_active_user", u);
+  localStorage.setItem("yinnotp_user_id", u);
+  localStorage.setItem("yinnotp_username", u);
+  localStorage.setItem("yinnotp_name", u);
+  if (email) localStorage.setItem("yinnotp_email", String(email));
 
-  // clear legacy cache (biar gak kebawa akun lama)
+  // IMPORTANT: token backend (dipakai halaman deposit/pay)
+  if (token) localStorage.setItem("yinnotp_token", String(token));
+
+  // clear cache GLOBAL (legacy)
   localStorage.removeItem("yinnotp_balance");
   localStorage.removeItem("yinnotp_deposit_history");
+
+  // clear cache PER-USER (biar akun beda gak ketuker)
+  try {
+    localStorage.removeItem(`yinnotp_balance:${u}`);
+    localStorage.removeItem(`yinnotp_deposit_history:${u}`);
+    localStorage.removeItem(`yinnotp_last_sync:${u}`);
+  } catch {}
 }
 
 export default function LoginPage() {
@@ -53,6 +77,7 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true);
 
   useEffect(() => {
+    // prewarm next-auth biar klik sosial cepet
     try {
       getCsrfToken().catch(() => {});
     } catch {}
@@ -60,6 +85,7 @@ export default function LoginPage() {
       fetch("/api/auth/providers", { cache: "no-store" }).catch(() => {});
     } catch {}
 
+    // load saved session
     setLast(readLastSession());
 
     (async () => {
@@ -89,38 +115,37 @@ export default function LoginPage() {
       });
 
       const t = await r.text();
-      let j = {};
-      try {
-        j = t ? JSON.parse(t) : {};
-      } catch {
-        j = {};
-      }
+      const j = safeJson(t);
 
       if (!r.ok || !j.ok) {
         toast.error(j.message || "Login gagal");
         return;
       }
 
-      const username = j.data?.username || "";
-      const email = j.data?.email || "";
+      // fallback penting (kadang backend gak ngirim username)
+      const username = String(j.data?.username || j.data?.user || "").trim() || id;
+      const email = String(j.data?.email || "").trim();
+      const token = String(j.data?.token || "").trim();
 
-      setActiveUser(username, email);
+      // set active user + token backend
+      setActiveUser(username, email, token, id);
 
-      if (remember && j.data?.token && username && email) {
+      // remember session (buat auto login)
+      if (remember && token && username && email) {
         localStorage.setItem(
           "yinnotp:last_session",
           JSON.stringify({
             username,
             email,
-            token: j.data.token,
+            token,
             ts: Date.now(),
           })
         );
-        setLast({ username, email, token: j.data.token, ts: Date.now() });
+        setLast({ username, email, token, ts: Date.now() });
       }
 
       toast.success("Login berhasil");
-      window.location.href = DASHBOARD_URL;
+      window.location.replace(DASHBOARD_URL);
     } catch {
       toast.error("Server error / koneksi putus");
     } finally {
@@ -145,12 +170,7 @@ export default function LoginPage() {
       });
 
       const t = await r.text();
-      let j = {};
-      try {
-        j = t ? JSON.parse(t) : {};
-      } catch {
-        j = {};
-      }
+      const j = safeJson(t);
 
       if (!r.ok || !j.ok) {
         localStorage.removeItem("yinnotp:last_session");
@@ -159,10 +179,11 @@ export default function LoginPage() {
         return;
       }
 
-      setActiveUser(cur.username, cur.email);
+      // SET ACTIVE + token backend dari last_session
+      setActiveUser(cur.username, cur.email, cur.token, cur.username);
 
       toast.success("Auto login berhasil");
-      window.location.href = DASHBOARD_URL;
+      window.location.replace(DASHBOARD_URL);
     } catch {
       toast.error("Server error / koneksi putus");
     } finally {
@@ -210,7 +231,12 @@ export default function LoginPage() {
         </div>
 
         {last?.username && last?.email ? (
-          <div className="saved-account" onClick={clickSaved} role="button" title="Klik untuk auto login">
+          <div
+            className="saved-account"
+            onClick={clickSaved}
+            role="button"
+            title="Klik untuk auto login"
+          >
             <div className="account-info">
               <div className="avatar">{String(last.username).slice(0, 1).toUpperCase()}</div>
               <div className="account-details">
@@ -259,10 +285,21 @@ export default function LoginPage() {
 
           <div className="form-options">
             <label className="remember-me">
-              <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+              />
               Remember Me
             </label>
-            <a href="#" className="forgot-pass" onClick={(e) => { e.preventDefault(); toast("Coming soon"); }}>
+            <a
+              href="#"
+              className="forgot-pass"
+              onClick={(e) => {
+                e.preventDefault();
+                toast("Coming soon");
+              }}
+            >
               Forgot Password?
             </a>
           </div>

@@ -29,6 +29,24 @@ function readLastSession() {
   }
 }
 
+// ✅ aktifin user untuk cache per akun
+function setActiveUserFrom(username) {
+  if (typeof window === "undefined") return;
+  const u = String(username || "").trim();
+  if (!u) return;
+
+  const prev = localStorage.getItem("yinnotp_active_user") || "";
+  localStorage.setItem("yinnotp_active_user", u);
+  localStorage.setItem("yinnotp_user_id", u);
+  localStorage.setItem("yinnotp_name", u);
+
+  // kalau ganti akun, bersihin cache global lama biar ga “nempel”
+  if (prev && prev !== u) {
+    localStorage.removeItem("yinnotp_balance");
+    localStorage.removeItem("yinnotp_deposit_history");
+  }
+}
+
 export default function LoginPage() {
   const router = useRouter();
 
@@ -41,7 +59,7 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true);
 
   useEffect(() => {
-    // prewarm next-auth biar tombol social cepat
+    // prewarm next-auth biar social login responsif
     try {
       getCsrfToken().catch(() => {});
     } catch {}
@@ -69,27 +87,43 @@ export default function LoginPage() {
       });
 
       const text = await r.text();
-      const j = text ? JSON.parse(text) : {};
+      let j = null;
+      try {
+        j = text ? JSON.parse(text) : null;
+      } catch {
+        j = null;
+      }
 
-      if (!r.ok || !j.ok) {
-        toast.error(j.message || "Login gagal");
+      if (!r.ok || !j?.ok) {
+        toast.error(j?.message || "Login gagal");
+        setLoading(false);
         return;
       }
 
+      const username = j?.data?.username || id;
+
+      // ✅ set user aktif untuk deposit flow
+      setActiveUserFrom(username);
+
       if (remember && j.data?.token && j.data?.username && j.data?.email) {
-        const payload = {
+        localStorage.setItem(
+          "yinnotp:last_session",
+          JSON.stringify({
+            username: j.data.username,
+            email: j.data.email,
+            token: j.data.token,
+            ts: Date.now(),
+          })
+        );
+        setLast({
           username: j.data.username,
           email: j.data.email,
           token: j.data.token,
           ts: Date.now(),
-        };
-        localStorage.setItem("yinnotp:last_session", JSON.stringify(payload));
-        setLast(payload);
+        });
       }
 
       toast.success("Login berhasil");
-
-      // ✅ redirect ke dashboard utama
       router.replace(DASHBOARD_URL);
     } catch {
       toast.error("Server error / koneksi putus");
@@ -115,18 +149,25 @@ export default function LoginPage() {
       });
 
       const text = await r.text();
-      const j = text ? JSON.parse(text) : {};
+      let j = null;
+      try {
+        j = text ? JSON.parse(text) : null;
+      } catch {
+        j = null;
+      }
 
-      if (!r.ok || !j.ok) {
+      if (!r.ok || !j?.ok) {
         localStorage.removeItem("yinnotp:last_session");
         setLast(null);
-        toast.error(j.message || "Sesi habis, silakan login ulang");
+        toast.error(j?.message || "Sesi habis, silakan login ulang");
+        setLoading(false);
         return;
       }
 
-      toast.success("Auto login berhasil");
+      // ✅ set user aktif untuk deposit flow
+      setActiveUserFrom(cur.username);
 
-      // ✅ redirect ke dashboard utama
+      toast.success("Auto login berhasil");
       router.replace(DASHBOARD_URL);
     } catch {
       toast.error("Server error / koneksi putus");
@@ -193,11 +234,7 @@ export default function LoginPage() {
               </div>
             </div>
             <span
-              style={{
-                fontSize: 22,
-                fontWeight: 900,
-                color: "var(--navy-dark)",
-              }}
+              style={{ fontSize: 22, fontWeight: 900, color: "var(--navy-dark)" }}
             >
               ☄
             </span>
@@ -231,9 +268,7 @@ export default function LoginPage() {
                 required
               />
               <i
-                className={`fa-regular ${
-                  showPwd ? "fa-eye" : "fa-eye-slash"
-                } suffix`}
+                className={`fa-regular ${showPwd ? "fa-eye" : "fa-eye-slash"} suffix`}
                 onClick={() => setShowPwd((s) => !s)}
                 role="button"
                 aria-label="Toggle password"

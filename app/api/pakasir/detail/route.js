@@ -1,51 +1,63 @@
+import { NextResponse } from "next/server";
+
+export const dynamic = "force-dynamic";
+
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
-    const order_id = searchParams.get("order_id");
-    const amount = searchParams.get("amount");
+    const order_id = (searchParams.get("order_id") || "").trim();
+    const amountRaw = searchParams.get("amount") || "";
+    const amount = Number(String(amountRaw).replace(/[^\d]/g, ""));
 
     const project = process.env.PAKASIR_PROJECT;
     const api_key = process.env.PAKASIR_API_KEY;
-    const base = process.env.PAKASIR_BASE_URL || "https://app.pakasir.com";
 
     if (!project || !api_key) {
-      return new Response(
-        JSON.stringify({ ok: false, message: "Missing PAKASIR_PROJECT / PAKASIR_API_KEY env" }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
+      return NextResponse.json(
+        { ok: false, error: "ENV PAKASIR_PROJECT / PAKASIR_API_KEY belum diset di server." },
+        { status: 500 }
+      );
+    }
+    if (!order_id || !Number.isFinite(amount) || amount <= 0) {
+      return NextResponse.json({ ok: false, error: "Param order_id/amount invalid." }, { status: 400 });
+    }
+
+    const url = new URL("https://app.pakasir.com/api/transactiondetail");
+    url.searchParams.set("project", project);
+    url.searchParams.set("amount", String(amount));
+    url.searchParams.set("order_id", order_id);
+    url.searchParams.set("api_key", api_key);
+
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    const text = await res.text();
+
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Pakasir balikin respon non-JSON / kosong.",
+          status: res.status,
+          body_preview: (text || "").slice(0, 300),
+        },
+        { status: 502 }
       );
     }
 
-    if (!order_id || !amount) {
-      return new Response(JSON.stringify({ ok: false, message: "Missing order_id/amount" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const url =
-      `${base}/api/transactiondetail?project=${encodeURIComponent(project)}` +
-      `&amount=${encodeURIComponent(amount)}` +
-      `&order_id=${encodeURIComponent(order_id)}` +
-      `&api_key=${encodeURIComponent(api_key)}`;
-
-    const res = await fetch(url, { method: "GET" });
-    const data = await res.json().catch(() => ({}));
-
     if (!res.ok) {
-      return new Response(JSON.stringify({ ok: false, status: res.status, data }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json(
+        { ok: false, error: "Pakasir error.", status: res.status, data },
+        { status: 502 }
+      );
     }
 
-    return new Response(JSON.stringify({ ok: true, ...data }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    return NextResponse.json({ ok: true, data }, { status: 200 });
   } catch (e) {
-    return new Response(JSON.stringify({ ok: false, message: String(e) }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return NextResponse.json(
+      { ok: false, error: e?.message || String(e) },
+      { status: 500 }
+    );
   }
 }

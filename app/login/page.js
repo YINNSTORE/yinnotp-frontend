@@ -4,7 +4,6 @@ import "./login.css";
 import { useEffect, useState } from "react";
 import toast, { Toaster } from "react-hot-toast";
 import { signIn, getCsrfToken } from "next-auth/react";
-import { useRouter } from "next/navigation";
 
 const TTL = 12 * 60 * 60 * 1000;
 const DASHBOARD_URL = "/dashboard";
@@ -29,27 +28,22 @@ function readLastSession() {
   }
 }
 
-// ✅ aktifin user untuk cache per akun
-function setActiveUserFrom(username) {
-  if (typeof window === "undefined") return;
-  const u = String(username || "").trim();
-  if (!u) return;
+function setActiveUser(username, email) {
+  if (!username) return;
 
-  const prev = localStorage.getItem("yinnotp_active_user") || "";
-  localStorage.setItem("yinnotp_active_user", u);
-  localStorage.setItem("yinnotp_user_id", u);
-  localStorage.setItem("yinnotp_name", u);
+  // set active identity (biar /topup/pay gak nyasar)
+  localStorage.setItem("yinnotp_active_user", username);
+  localStorage.setItem("yinnotp_user_id", username);
+  localStorage.setItem("yinnotp_username", username);
+  localStorage.setItem("yinnotp_name", username);
+  if (email) localStorage.setItem("yinnotp_email", email);
 
-  // kalau ganti akun, bersihin cache global lama biar ga “nempel”
-  if (prev && prev !== u) {
-    localStorage.removeItem("yinnotp_balance");
-    localStorage.removeItem("yinnotp_deposit_history");
-  }
+  // clear legacy cache (biar gak kebawa akun lama)
+  localStorage.removeItem("yinnotp_balance");
+  localStorage.removeItem("yinnotp_deposit_history");
 }
 
 export default function LoginPage() {
-  const router = useRouter();
-
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [last, setLast] = useState(null);
@@ -59,7 +53,6 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true);
 
   useEffect(() => {
-    // prewarm next-auth biar social login responsif
     try {
       getCsrfToken().catch(() => {});
     } catch {}
@@ -68,6 +61,15 @@ export default function LoginPage() {
     } catch {}
 
     setLast(readLastSession());
+
+    (async () => {
+      try {
+        await getCsrfToken();
+      } catch {}
+      try {
+        await fetch("/api/auth/providers", { cache: "no-store" });
+      } catch {}
+    })();
   }, []);
 
   async function submitLogin(e) {
@@ -86,45 +88,39 @@ export default function LoginPage() {
         body: JSON.stringify({ ident: id, password }),
       });
 
-      const text = await r.text();
-      let j = null;
+      const t = await r.text();
+      let j = {};
       try {
-        j = text ? JSON.parse(text) : null;
+        j = t ? JSON.parse(t) : {};
       } catch {
-        j = null;
+        j = {};
       }
 
-      if (!r.ok || !j?.ok) {
-        toast.error(j?.message || "Login gagal");
-        setLoading(false);
+      if (!r.ok || !j.ok) {
+        toast.error(j.message || "Login gagal");
         return;
       }
 
-      const username = j?.data?.username || id;
+      const username = j.data?.username || "";
+      const email = j.data?.email || "";
 
-      // ✅ set user aktif untuk deposit flow
-      setActiveUserFrom(username);
+      setActiveUser(username, email);
 
-      if (remember && j.data?.token && j.data?.username && j.data?.email) {
+      if (remember && j.data?.token && username && email) {
         localStorage.setItem(
           "yinnotp:last_session",
           JSON.stringify({
-            username: j.data.username,
-            email: j.data.email,
+            username,
+            email,
             token: j.data.token,
             ts: Date.now(),
           })
         );
-        setLast({
-          username: j.data.username,
-          email: j.data.email,
-          token: j.data.token,
-          ts: Date.now(),
-        });
+        setLast({ username, email, token: j.data.token, ts: Date.now() });
       }
 
       toast.success("Login berhasil");
-      router.replace(DASHBOARD_URL);
+      window.location.href = DASHBOARD_URL;
     } catch {
       toast.error("Server error / koneksi putus");
     } finally {
@@ -148,27 +144,25 @@ export default function LoginPage() {
         body: JSON.stringify({ token: cur.token }),
       });
 
-      const text = await r.text();
-      let j = null;
+      const t = await r.text();
+      let j = {};
       try {
-        j = text ? JSON.parse(text) : null;
+        j = t ? JSON.parse(t) : {};
       } catch {
-        j = null;
+        j = {};
       }
 
-      if (!r.ok || !j?.ok) {
+      if (!r.ok || !j.ok) {
         localStorage.removeItem("yinnotp:last_session");
         setLast(null);
-        toast.error(j?.message || "Sesi habis, silakan login ulang");
-        setLoading(false);
+        toast.error(j.message || "Sesi habis, silakan login ulang");
         return;
       }
 
-      // ✅ set user aktif untuk deposit flow
-      setActiveUserFrom(cur.username);
+      setActiveUser(cur.username, cur.email);
 
       toast.success("Auto login berhasil");
-      router.replace(DASHBOARD_URL);
+      window.location.href = DASHBOARD_URL;
     } catch {
       toast.error("Server error / koneksi putus");
     } finally {
@@ -189,9 +183,7 @@ export default function LoginPage() {
         </div>
 
         <h2>Welcome back! 👋</h2>
-        <p className="subtitle">
-          Please sign-in to your account to view the dashboard
-        </p>
+        <p className="subtitle">Please sign-in to your account to view the dashboard</p>
 
         <div className="social-buttons">
           <button
@@ -218,26 +210,15 @@ export default function LoginPage() {
         </div>
 
         {last?.username && last?.email ? (
-          <div
-            className="saved-account"
-            onClick={clickSaved}
-            role="button"
-            title="Klik untuk auto login"
-          >
+          <div className="saved-account" onClick={clickSaved} role="button" title="Klik untuk auto login">
             <div className="account-info">
-              <div className="avatar">
-                {String(last.username).slice(0, 1).toUpperCase()}
-              </div>
+              <div className="avatar">{String(last.username).slice(0, 1).toUpperCase()}</div>
               <div className="account-details">
                 <p>Masuk sebagai {last.username}</p>
                 <span>{last.email}</span>
               </div>
             </div>
-            <span
-              style={{ fontSize: 22, fontWeight: 900, color: "var(--navy-dark)" }}
-            >
-              ☄
-            </span>
+            <span style={{ fontSize: 22, fontWeight: 900, color: "var(--navy-dark)" }}>☄</span>
           </div>
         ) : null}
 
@@ -278,30 +259,15 @@ export default function LoginPage() {
 
           <div className="form-options">
             <label className="remember-me">
-              <input
-                type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
-              />
+              <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
               Remember Me
             </label>
-            <a
-              href="#"
-              className="forgot-pass"
-              onClick={(e) => {
-                e.preventDefault();
-                toast("Coming soon");
-              }}
-            >
+            <a href="#" className="forgot-pass" onClick={(e) => { e.preventDefault(); toast("Coming soon"); }}>
               Forgot Password?
             </a>
           </div>
 
-          <button
-            type="submit"
-            className="btn-submit"
-            aria-busy={loading ? "true" : "false"}
-          >
+          <button type="submit" className="btn-submit" aria-busy={loading ? "true" : "false"}>
             {loading ? "Memproses..." : "Masuk"}
           </button>
         </form>

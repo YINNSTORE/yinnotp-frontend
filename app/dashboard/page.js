@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import ThemeMenu from "../components/ThemeMenu";
 import BottomNav from "../components/BottomNav";
 import {
@@ -22,12 +23,27 @@ const formatIDR = (n) =>
     maximumFractionDigits: 0,
   }).format(Number.isFinite(n) ? n : 0);
 
+function AppLogo({ src, alt }) {
+  return (
+    <div
+      className="relative grid h-14 w-14 place-items-center rounded-2xl border border-[var(--yinn-border)] overflow-hidden"
+      style={{
+        background:
+          "linear-gradient(135deg, rgba(99,102,241,.10), rgba(168,85,247,.10))",
+      }}
+    >
+      {/* kalau file belum ada, gambar akan 404 tapi build aman */}
+      <Image src={src} alt={alt} width={36} height={36} />
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [slide, setSlide] = useState(0);
   const [filter, setFilter] = useState("Populer");
   const [showAll, setShowAll] = useState(false);
+  const [query, setQuery] = useState("");
 
-  // optional: ambil user & saldo dari localStorage kalau ada
   const [user, setUser] = useState({ name: "User", balance: 0 });
 
   const banners = useMemo(
@@ -59,28 +75,44 @@ export default function DashboardPage() {
     []
   );
 
+  // ✅ pakai icon asli (path di public/apps/)
   const apps = useMemo(
     () => [
-      { name: "WhatsApp", tag: "WhatsApp", emoji: "💬" },
-      { name: "Telegram", tag: "Telegram", emoji: "✈️" }, // BUKAN icon lucide ya (biar gak error)
-      { name: "TikTok", tag: "TikTok", emoji: "🎵" },
-      { name: "Instagram", tag: "Lainnya", emoji: "📸" },
-      { name: "Facebook", tag: "Lainnya", emoji: "👥" },
-      { name: "Gmail", tag: "Google", emoji: "📧" },
-      { name: "Google", tag: "Google", emoji: "🔎" },
-      { name: "Shopee", tag: "Lainnya", emoji: "🛍️" },
-      { name: "Tokopedia", tag: "Lainnya", emoji: "🛒" },
-      { name: "Discord", tag: "Lainnya", emoji: "🎧" },
-      { name: "X (Twitter)", tag: "Lainnya", emoji: "✖️" },
-      { name: "WeChat", tag: "Lainnya", emoji: "🟢" },
+      { name: "WhatsApp", tag: "WhatsApp", icon: "/apps/whatsapp.png" },
+      { name: "Telegram", tag: "Telegram", icon: "/apps/telegram.png" },
+      { name: "TikTok", tag: "TikTok", icon: "/apps/tiktok.png" },
+      { name: "Instagram", tag: "Lainnya", icon: "/apps/instagram.png" },
+      { name: "Facebook", tag: "Lainnya", icon: "/apps/facebook.png" },
+      { name: "Gmail", tag: "Google", icon: "/apps/gmail.png" },
+      { name: "Google", tag: "Google", icon: "/apps/google.png" },
+      { name: "Shopee", tag: "Lainnya", icon: "/apps/shopee.png" },
+      { name: "Tokopedia", tag: "Lainnya", icon: "/apps/tokopedia.png" },
+      { name: "Discord", tag: "Lainnya", icon: "/apps/discord.png" },
+      { name: "X (Twitter)", tag: "Lainnya", icon: "/apps/x.png" },
+      { name: "WeChat", tag: "Lainnya", icon: "/apps/wechat.png" },
     ],
     []
   );
 
   const filteredApps = useMemo(() => {
-    const list = filter === "Populer" ? apps.slice(0, 8) : apps.filter((a) => a.tag === filter);
+    const q = query.trim().toLowerCase();
+
+    // kalau user lagi search: cari dari semua apps (lebih enak)
+    if (q) {
+      const list = apps.filter((a) => a.name.toLowerCase().includes(q));
+      return showAll ? list : list.slice(0, 8);
+    }
+
+    // kalau gak search: normal pakai chip
+    const list =
+      filter === "Populer"
+        ? apps.slice(0, 8)
+        : filter === "Lainnya"
+        ? apps.filter((a) => a.tag === "Lainnya")
+        : apps.filter((a) => a.tag === filter);
+
     return showAll ? list : list.slice(0, 8);
-  }, [apps, filter, showAll]);
+  }, [apps, filter, showAll, query]);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -117,7 +149,8 @@ export default function DashboardPage() {
             <div
               className="yinn-float-up grid h-9 w-9 place-items-center rounded-xl"
               style={{
-                background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                background:
+                  "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
                 boxShadow: "var(--yinn-soft)",
               }}
               aria-hidden="true"
@@ -125,7 +158,9 @@ export default function DashboardPage() {
               <span className="text-white text-base leading-none">☄𔓎</span>
             </div>
             <div className="min-w-0">
-              <div className="truncate text-sm font-extrabold leading-tight">YinnOTP</div>
+              <div className="truncate text-sm font-extrabold leading-tight">
+                YinnOTP
+              </div>
               <div className="truncate text-[11px] text-[var(--yinn-muted)]">
                 Virtual Number & OTP API
               </div>
@@ -138,7 +173,9 @@ export default function DashboardPage() {
               style={{ boxShadow: "var(--yinn-soft)" }}
             >
               <span className="text-[11px] text-[var(--yinn-muted)]">Saldo</span>
-              <span className="text-sm font-semibold">{formatIDR(user.balance)}</span>
+              <span className="text-sm font-semibold">
+                {formatIDR(user.balance)}
+              </span>
               <Link
                 href="/topup"
                 className="grid h-7 w-7 place-items-center rounded-lg text-white"
@@ -168,7 +205,7 @@ export default function DashboardPage() {
       </header>
 
       {/* CONTENT */}
-      <main className="mx-auto max-w-[520px] px-4 pb-24 pt-4">
+      <main className="mx-auto max-w-[520px] px-4 pt-4 pb-[calc(120px+env(safe-area-inset-bottom))]">
         {/* BANNER / SLIDER */}
         <section
           className="relative overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)]"
@@ -201,8 +238,12 @@ export default function DashboardPage() {
                         <span className="yinn-float-down">☄𔓎</span>
                         <span>{b.badge}</span>
                       </div>
-                      <h3 className="mt-2 text-lg font-extrabold leading-tight">{b.title}</h3>
-                      <p className="mt-1 text-sm text-[var(--yinn-muted)]">{b.subtitle}</p>
+                      <h3 className="mt-2 text-lg font-extrabold leading-tight">
+                        {b.title}
+                      </h3>
+                      <p className="mt-1 text-sm text-[var(--yinn-muted)]">
+                        {b.subtitle}
+                      </p>
                     </div>
 
                     <div className="yinn-float-up grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)]">
@@ -254,7 +295,9 @@ export default function DashboardPage() {
             </div>
             <div className="min-w-0">
               <div className="font-extrabold leading-tight">Virtual Number</div>
-              <div className="text-sm text-[var(--yinn-muted)]">OTP only • nomor fresh • auto cancel</div>
+              <div className="text-sm text-[var(--yinn-muted)]">
+                OTP only • nomor fresh • auto cancel
+              </div>
             </div>
             <Link
               href="/order"
@@ -292,14 +335,10 @@ export default function DashboardPage() {
           >
             <Search size={18} className="text-[var(--yinn-muted)]" />
             <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
               className="w-full bg-transparent text-sm outline-none placeholder:text-[var(--yinn-muted)]"
               placeholder="Cari aplikasi (WhatsApp, Telegram, TikTok...)"
-              onChange={(e) => {
-                const q = e.target.value.trim().toLowerCase();
-                if (!q) return;
-                // quick filter: kalau user ngetik, pindah ke "Lainnya" / "Populer" tetep aman
-                setFilter("Lainnya");
-              }}
             />
           </div>
         </section>
@@ -310,7 +349,10 @@ export default function DashboardPage() {
             {chips.map((c) => (
               <button
                 key={c}
-                onClick={() => setFilter(c)}
+                onClick={() => {
+                  setFilter(c);
+                  setQuery(""); // biar chip & search gak “berantem”
+                }}
                 className={[
                   "whitespace-nowrap rounded-full border px-4 py-2 text-sm font-semibold",
                   c === filter
@@ -338,11 +380,15 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* POPULAR GRID */}
+        {/* GRID */}
         <section className="mt-2">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-extrabold">
-              {filter === "Populer" ? "🔥 Lagi Populer" : `Kategori: ${filter}`}
+              {query.trim()
+                ? `Hasil: "${query.trim()}"`
+                : filter === "Populer"
+                ? "🔥 Lagi Populer"
+                : `Kategori: ${filter}`}
             </h2>
             <button
               onClick={() => setShowAll((v) => !v)}
@@ -361,15 +407,7 @@ export default function DashboardPage() {
                 style={{ boxShadow: "var(--yinn-soft)" }}
               >
                 <div className="grid place-items-center">
-                  <div
-                    className="grid h-14 w-14 place-items-center rounded-2xl border border-[var(--yinn-border)]"
-                    style={{
-                      background:
-                        "linear-gradient(135deg, rgba(99,102,241,.10), rgba(168,85,247,.10))",
-                    }}
-                  >
-                    <span className="text-2xl">{a.emoji}</span>
-                  </div>
+                  <AppLogo src={a.icon} alt={a.name} />
                 </div>
                 <div className="mt-2 line-clamp-1 text-center text-xs font-extrabold">
                   {a.name}
@@ -378,7 +416,7 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          {/* small info / trust row */}
+          {/* trust row */}
           <div className="mt-4 grid gap-3">
             <div
               className="flex items-center gap-3 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3"

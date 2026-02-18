@@ -1,109 +1,405 @@
 "use client";
-import React from 'react';
-import { Sun, User as UserIcon, Wallet, ChevronRight, PlusCircle, RotateCw, Plus, Headphones, HelpCircle, ChevronDown, Bell, MessageCircle, Send, Facebook } from 'lucide-react';
-import BottomNav from '../components/BottomNav';
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import ThemeMenu from "../components/ThemeMenu";
+import BottomNav from "../components/BottomNav";
+import {
+  Bell,
+  ChevronRight,
+  Flame,
+  Plus,
+  Search,
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
+} from "lucide-react";
+
+const formatIDR = (n) =>
+  new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(n) ? n : 0);
 
 export default function DashboardPage() {
+  const [slide, setSlide] = useState(0);
+  const [filter, setFilter] = useState("Populer");
+  const [showAll, setShowAll] = useState(false);
+
+  // optional: ambil user & saldo dari localStorage kalau ada
+  const [user, setUser] = useState({ name: "User", balance: 0 });
+
+  const banners = useMemo(
+    () => [
+      {
+        title: "JOIN CHANNEL YinnOTP",
+        subtitle: "Info stock, update sistem, & diskon harian.",
+        badge: "Update",
+        cta: { label: "Gabung", href: "https://t.me/" },
+      },
+      {
+        title: "DELIVER RATE 99%",
+        subtitle: "Nomor fresh • cepat masuk • auto cancel",
+        badge: "Quality",
+        cta: { label: "Order OTP", href: "/order" },
+      },
+      {
+        title: "API READY",
+        subtitle: "Integrasi mudah untuk bot & automation.",
+        badge: "Dev",
+        cta: { label: "Mulai", href: "/order" },
+      },
+    ],
+    []
+  );
+
+  const chips = useMemo(
+    () => ["Populer", "WhatsApp", "Telegram", "TikTok", "Google", "Lainnya"],
+    []
+  );
+
+  const apps = useMemo(
+    () => [
+      { name: "WhatsApp", tag: "WhatsApp", emoji: "💬" },
+      { name: "Telegram", tag: "Telegram", emoji: "✈️" }, // BUKAN icon lucide ya (biar gak error)
+      { name: "TikTok", tag: "TikTok", emoji: "🎵" },
+      { name: "Instagram", tag: "Lainnya", emoji: "📸" },
+      { name: "Facebook", tag: "Lainnya", emoji: "👥" },
+      { name: "Gmail", tag: "Google", emoji: "📧" },
+      { name: "Google", tag: "Google", emoji: "🔎" },
+      { name: "Shopee", tag: "Lainnya", emoji: "🛍️" },
+      { name: "Tokopedia", tag: "Lainnya", emoji: "🛒" },
+      { name: "Discord", tag: "Lainnya", emoji: "🎧" },
+      { name: "X (Twitter)", tag: "Lainnya", emoji: "✖️" },
+      { name: "WeChat", tag: "Lainnya", emoji: "🟢" },
+    ],
+    []
+  );
+
+  const filteredApps = useMemo(() => {
+    const list = filter === "Populer" ? apps.slice(0, 8) : apps.filter((a) => a.tag === filter);
+    return showAll ? list : list.slice(0, 8);
+  }, [apps, filter, showAll]);
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      setSlide((s) => (s + 1) % banners.length);
+    }, 4500);
+    return () => clearInterval(t);
+  }, [banners.length]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const storedName =
+      localStorage.getItem("yinnotp_name") ||
+      localStorage.getItem("username") ||
+      localStorage.getItem("name") ||
+      "User";
+
+    const storedBalRaw =
+      localStorage.getItem("yinnotp_balance") ||
+      localStorage.getItem("balance") ||
+      "0";
+
+    const storedBal = Number(String(storedBalRaw).replace(/[^\d]/g, "")) || 0;
+
+    setUser({ name: storedName, balance: storedBal });
+  }, []);
+
   return (
-    <div className="min-h-screen bg-[#F3F6F9] pb-32 text-slate-900 font-sans">
-      <div className="max-w-md mx-auto p-4">
-        
-        {/* Header Section */}
-        <header className="flex justify-between items-center mb-6 pt-2">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-full bg-pink-500 text-white flex items-center justify-center font-bold text-xl shadow-md border-2 border-white">Y</div>
-            <div>
-              <h4 className="text-[16px] font-black leading-tight text-slate-800">yinnzzmc</h4>
-              <p className="text-[11px] text-slate-500 font-medium">Selamat malam 💤</p>
+    <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
+      {/* TOP BAR */}
+      <header className="sticky top-0 z-40 border-b border-[var(--yinn-border)] bg-[var(--yinn-surface)]">
+        <div className="mx-auto flex max-w-[520px] items-center gap-3 px-4 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <div
+              className="yinn-float-up grid h-9 w-9 place-items-center rounded-xl"
+              style={{
+                background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                boxShadow: "var(--yinn-soft)",
+              }}
+              aria-hidden="true"
+            >
+              <span className="text-white text-base leading-none">☄𔓎</span>
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-extrabold leading-tight">YinnOTP</div>
+              <div className="truncate text-[11px] text-[var(--yinn-muted)]">
+                Virtual Number & OTP API
+              </div>
             </div>
           </div>
-          <div className="flex gap-2">
-            <button className="p-2.5 bg-white rounded-2xl shadow-sm border border-gray-50"><Sun size={18} className="text-slate-400" /></button>
-            <button className="p-2.5 bg-white rounded-2xl shadow-sm border border-gray-50"><UserIcon size={18} className="text-slate-400" /></button>
-          </div>
-        </header>
 
-        {/* Top Content: Saldo & Promo */}
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div className="bg-white p-4 rounded-[28px] shadow-sm border border-white">
-            <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 mb-1 tracking-wide uppercase">
-              <Wallet size={12} /> Saldo Kamu
+          <div className="ms-auto flex items-center gap-2">
+            <div
+              className="flex items-center gap-2 rounded-xl border border-[var(--yinn-border)] px-3 py-2"
+              style={{ boxShadow: "var(--yinn-soft)" }}
+            >
+              <span className="text-[11px] text-[var(--yinn-muted)]">Saldo</span>
+              <span className="text-sm font-semibold">{formatIDR(user.balance)}</span>
+              <Link
+                href="/topup"
+                className="grid h-7 w-7 place-items-center rounded-lg text-white"
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                }}
+                aria-label="Top up saldo"
+                title="Top up"
+              >
+                <Plus size={16} />
+              </Link>
             </div>
-            <h2 className="text-xl font-black mb-3 text-slate-800 tracking-tight">1.000 IDR</h2>
-            <button className="w-full bg-[#E8FBF3] text-[#10B981] py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 hover:bg-emerald-100 transition-all">
-              <PlusCircle size={14} /> Top Up
+
+            <button
+              className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)]"
+              style={{ boxShadow: "var(--yinn-soft)" }}
+              aria-label="Notifikasi"
+              title="Notifikasi"
+            >
+              <Bell size={18} />
             </button>
-          </div>
-          
-          <div className="bg-gradient-to-br from-[#FF8E53] via-[#FFB347] to-[#10B981] p-4 rounded-[28px] text-white relative shadow-lg shadow-orange-100 overflow-hidden">
-            <h5 className="text-[14px] font-black leading-tight mb-1">Get Virtual Number</h5>
-            <p className="text-[9px] opacity-90 leading-tight mb-3 font-medium">OTP access for 1,038+ apps across 193 countries</p>
-            <div className="flex items-center gap-1.5 pt-1">
-               <div className="flex -space-x-1.5">
-                  <div className="bg-white/20 p-1 rounded-md"><MessageCircle size={10} /></div>
-                  <div className="bg-white/20 p-1 rounded-md"><Send size={10} /></div>
-                  <div className="bg-white/20 p-1 rounded-md"><Facebook size={10} /></div>
-               </div>
-              <span className="text-[10px] font-black ml-auto flex items-center gap-0.5">Beli Nomor <ChevronRight size={10} strokeWidth={4} /></span>
-            </div>
+
+            <ThemeMenu />
           </div>
         </div>
+      </header>
 
-        {/* Server Status */}
-        <div className="flex gap-2 mb-6">
-          <div className="bg-white px-4 py-2 rounded-2xl text-[10px] font-bold flex items-center gap-2 shadow-sm text-emerald-500 border border-white">
-            <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_#10B981]"></span> Online
-          </div>
-          <div className="bg-white px-4 py-2 rounded-2xl text-[10px] font-bold flex items-center gap-1.5 shadow-sm text-slate-400 border border-white">
-             <span className="text-emerald-500 font-black">235ms</span> response server saat ini
-          </div>
-        </div>
+      {/* CONTENT */}
+      <main className="mx-auto max-w-[520px] px-4 pb-24 pt-4">
+        {/* BANNER / SLIDER */}
+        <section
+          className="relative overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)]"
+          style={{ boxShadow: "var(--yinn-soft)" }}
+        >
+          <div className="relative h-[140px]">
+            {banners.map((b, i) => (
+              <div
+                key={b.title}
+                className={[
+                  "absolute inset-0 transition-opacity duration-500",
+                  i === slide ? "opacity-100" : "opacity-0",
+                ].join(" ")}
+              >
+                <div
+                  className="h-full w-full"
+                  style={{
+                    background:
+                      i === 0
+                        ? "linear-gradient(135deg, rgba(99,102,241,.22), rgba(168,85,247,.22))"
+                        : i === 1
+                        ? "linear-gradient(135deg, rgba(34,197,94,.18), rgba(99,102,241,.18))"
+                        : "linear-gradient(135deg, rgba(245,158,11,.16), rgba(168,85,247,.16))",
+                  }}
+                />
+                <div className="absolute inset-0 p-4">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="inline-flex items-center gap-2 rounded-full border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-3 py-1 text-[11px] text-[var(--yinn-muted)]">
+                        <span className="yinn-float-down">☄𔓎</span>
+                        <span>{b.badge}</span>
+                      </div>
+                      <h3 className="mt-2 text-lg font-extrabold leading-tight">{b.title}</h3>
+                      <p className="mt-1 text-sm text-[var(--yinn-muted)]">{b.subtitle}</p>
+                    </div>
 
-        {/* Pesanan Pending Box */}
-        <div className="bg-white rounded-[35px] p-6 mb-5 shadow-sm border border-white relative overflow-hidden">
-          <div className="flex justify-between items-center mb-8">
-            <h3 className="font-black text-[16px] text-slate-800">Pesanan Pending</h3>
-            <button className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:bg-slate-100 transition-colors"><RotateCw size={15} /></button>
-          </div>
-          <div className="flex flex-col items-center text-center py-6">
-            <div className="relative mb-4">
-               <img src="https://cdn-icons-png.flaticon.com/512/2362/2362252.png" className="w-28 drop-shadow-xl" alt="delivery-icon" />
-            </div>
-            <h4 className="font-black text-[15px] mb-1 text-slate-800 tracking-tight">Tidak ada pesanan</h4>
-            <p className="text-[12px] text-slate-400 font-medium mb-6">Pesanan aktif akan muncul disini</p>
-            <button className="bg-[#1E293B] text-white px-10 py-3.5 rounded-2xl text-xs font-black flex items-center gap-2 hover:bg-black transition-all shadow-xl shadow-slate-200 active:scale-95">
-              <Plus size={18} strokeWidth={3} /> Buat Pesanan
-            </button>
-          </div>
-        </div>
+                    <div className="yinn-float-up grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)]">
+                      <Sparkles size={20} />
+                    </div>
+                  </div>
 
-        {/* Bottom Section: Notifikasi & FAQ */}
-        <div className="grid grid-cols-1 gap-4">
-           {/* FAQ List */}
-           <div className="bg-white rounded-[35px] p-6 shadow-sm border border-white">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="p-2.5 bg-blue-50 rounded-2xl"><Headphones size={20} className="text-blue-600" /></div>
-                <div>
-                  <h3 className="font-black text-[16px] text-slate-800 leading-none">Pertanyaan Umum</h3>
-                  <p className="text-[10px] text-slate-400 font-bold mt-1">Pertanyaan yang sering diajukan</p>
+                  <div className="mt-3">
+                    <Link
+                      href={b.cta.href}
+                      className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white"
+                      style={{
+                        background:
+                          "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                      }}
+                    >
+                      {b.cta.label} <ChevronRight size={16} />
+                    </Link>
+                  </div>
                 </div>
               </div>
-              
-              <div className="space-y-3">
-                {["Ayo belajar membaca!", "OTP gak masuk masuk", "Cancel tapi saldo terpotong", "Lupa cancel active order", "Syarat refund"].map((text, i) => (
-                  <div key={i} className="flex justify-between items-center p-4 bg-[#F8FAFC] rounded-[20px] border border-slate-50 hover:border-slate-200 transition-all cursor-pointer group">
-                    <div className="flex items-center gap-3 text-[12px] font-bold text-slate-700">
-                      <div className="w-2 h-2 rounded-full bg-orange-400/20 flex items-center justify-center"><HelpCircle size={14} className="text-orange-400" /></div>
-                      {text}
-                    </div>
-                    <ChevronDown size={14} className="text-slate-300 group-hover:text-slate-500" />
-                  </div>
-                ))}
-              </div>
-           </div>
-        </div>
+            ))}
+          </div>
 
-      </div>
+          {/* dots */}
+          <div className="flex items-center justify-center gap-2 pb-3 pt-2">
+            {banners.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setSlide(i)}
+                className={[
+                  "h-2 w-2 rounded-full",
+                  i === slide ? "bg-[var(--yinn-text)]" : "bg-[var(--yinn-border)]",
+                ].join(" ")}
+                aria-label={`Slide ${i + 1}`}
+              />
+            ))}
+          </div>
+        </section>
+
+        {/* QUICK CARD: OTP ONLY */}
+        <section
+          className="mt-4 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4"
+          style={{ boxShadow: "var(--yinn-soft)" }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)]">
+              <Smartphone size={20} />
+            </div>
+            <div className="min-w-0">
+              <div className="font-extrabold leading-tight">Virtual Number</div>
+              <div className="text-sm text-[var(--yinn-muted)]">OTP only • nomor fresh • auto cancel</div>
+            </div>
+            <Link
+              href="/order"
+              className="ms-auto inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-extrabold text-white"
+              style={{
+                background:
+                  "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+              }}
+            >
+              BUY
+            </Link>
+          </div>
+
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3">
+              <div className="text-xs text-[var(--yinn-muted)]">Negara</div>
+              <div className="text-base font-extrabold">85+</div>
+            </div>
+            <div className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3">
+              <div className="text-xs text-[var(--yinn-muted)]">Aplikasi</div>
+              <div className="text-base font-extrabold">1700+</div>
+            </div>
+            <div className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3">
+              <div className="text-xs text-[var(--yinn-muted)]">Deliver</div>
+              <div className="text-base font-extrabold">99%</div>
+            </div>
+          </div>
+        </section>
+
+        {/* SEARCH */}
+        <section className="mt-4">
+          <div
+            className="flex items-center gap-2 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-3 py-3"
+            style={{ boxShadow: "var(--yinn-soft)" }}
+          >
+            <Search size={18} className="text-[var(--yinn-muted)]" />
+            <input
+              className="w-full bg-transparent text-sm outline-none placeholder:text-[var(--yinn-muted)]"
+              placeholder="Cari aplikasi (WhatsApp, Telegram, TikTok...)"
+              onChange={(e) => {
+                const q = e.target.value.trim().toLowerCase();
+                if (!q) return;
+                // quick filter: kalau user ngetik, pindah ke "Lainnya" / "Populer" tetep aman
+                setFilter("Lainnya");
+              }}
+            />
+          </div>
+        </section>
+
+        {/* CHIPS */}
+        <section className="mt-4">
+          <div className="flex items-center gap-2 overflow-x-auto pb-2">
+            {chips.map((c) => (
+              <button
+                key={c}
+                onClick={() => setFilter(c)}
+                className={[
+                  "whitespace-nowrap rounded-full border px-4 py-2 text-sm font-semibold",
+                  c === filter
+                    ? "border-transparent text-white"
+                    : "border-[var(--yinn-border)] bg-[var(--yinn-surface)]",
+                ].join(" ")}
+                style={
+                  c === filter
+                    ? {
+                        background:
+                          "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                      }
+                    : undefined
+                }
+              >
+                {c === "Populer" ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Flame size={16} /> Lagi Populer
+                  </span>
+                ) : (
+                  c
+                )}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* POPULAR GRID */}
+        <section className="mt-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-extrabold">
+              {filter === "Populer" ? "🔥 Lagi Populer" : `Kategori: ${filter}`}
+            </h2>
+            <button
+              onClick={() => setShowAll((v) => !v)}
+              className="text-sm font-semibold text-[var(--yinn-muted)]"
+            >
+              {showAll ? "Tampilkan sedikit" : "Tampilkan banyak"}
+            </button>
+          </div>
+
+          <div className="mt-3 grid grid-cols-3 gap-3">
+            {filteredApps.map((a) => (
+              <Link
+                key={a.name}
+                href="/order"
+                className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3"
+                style={{ boxShadow: "var(--yinn-soft)" }}
+              >
+                <div className="grid place-items-center">
+                  <div
+                    className="grid h-14 w-14 place-items-center rounded-2xl border border-[var(--yinn-border)]"
+                    style={{
+                      background:
+                        "linear-gradient(135deg, rgba(99,102,241,.10), rgba(168,85,247,.10))",
+                    }}
+                  >
+                    <span className="text-2xl">{a.emoji}</span>
+                  </div>
+                </div>
+                <div className="mt-2 line-clamp-1 text-center text-xs font-extrabold">
+                  {a.name}
+                </div>
+              </Link>
+            ))}
+          </div>
+
+          {/* small info / trust row */}
+          <div className="mt-4 grid gap-3">
+            <div
+              className="flex items-center gap-3 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3"
+              style={{ boxShadow: "var(--yinn-soft)" }}
+            >
+              <div className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)]">
+                <ShieldCheck size={18} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-extrabold">Aman & Transparan</div>
+                <div className="text-xs text-[var(--yinn-muted)]">
+                  Auto cancel tersedia jika OTP tidak masuk.
+                </div>
+              </div>
+              <Link href="/order" className="ms-auto text-sm font-bold">
+                Lihat <ChevronRight size={16} className="inline" />
+              </Link>
+            </div>
+          </div>
+        </section>
+      </main>
 
       <BottomNav />
     </div>

@@ -7,6 +7,9 @@ import toast, { Toaster } from "react-hot-toast";
 
 const TTL = 12 * 60 * 60 * 1000;
 
+// UX/logic default
+const DEFAULT_EXPIRE_MINUTES = 15;
+
 function safeJson(text) {
   try {
     if (!text) return null;
@@ -24,7 +27,6 @@ function readLastSession() {
     const ts = Number(obj?.ts || 0);
     if (!ts || Date.now() - ts > TTL) return null;
     if (!obj?.token) return null;
-    // ✅ username/email boleh kosong
     return {
       username: String(obj?.username || ""),
       email: String(obj?.email || ""),
@@ -38,7 +40,6 @@ function readLastSession() {
 
 function getActiveUserIdLoose() {
   try {
-    // ✅ ambil dari semua key yang mungkin ada
     return (
       localStorage.getItem("yinnotp_active_user") ||
       localStorage.getItem("yinnotp_user_id") ||
@@ -94,7 +95,9 @@ function normalizeStatus(obj) {
   if (["paid", "success", "sukses", "completed", "settlement", "done"].includes(s)) return "completed";
   if (["pending", "process", "processing", "menunggu", "unpaid", "waiting"].includes(s)) return "pending";
   if (["expire", "expired", "failed", "cancel", "canceled", "cancelled"].includes(s)) return "failed";
-  return s || "unknown";
+
+  // ✅ jangan UNKNOWN, default pending biar UX masuk akal
+  return s || "pending";
 }
 
 function pickPaymentNumber(obj) {
@@ -117,6 +120,7 @@ function pickPaymentNumber(obj) {
 
 function pickMeta(obj) {
   const amount = obj?.amount ?? obj?.data?.amount ?? obj?.payment?.amount ?? obj?.data?.payment?.amount ?? 0;
+
   const total =
     obj?.total_payment ??
     obj?.data?.total_payment ??
@@ -126,6 +130,7 @@ function pickMeta(obj) {
 
   const fee = obj?.fee ?? obj?.data?.fee ?? obj?.payment?.fee ?? obj?.data?.payment?.fee ?? 0;
 
+  // bisa seconds atau ms atau string iso—kita normalize nanti
   const created =
     obj?.created_at ??
     obj?.data?.created_at ??
@@ -144,8 +149,8 @@ function pickMeta(obj) {
     amount: Number(amount || 0) || 0,
     total: Number(total || 0) || 0,
     fee: Number(fee || 0) || 0,
-    created_at: Number(created || 0) || 0,
-    expired_at: Number(exp || 0) || 0,
+    created_at: created,
+    expired_at: exp,
   };
 }
 
@@ -157,9 +162,37 @@ function formatIDR(n) {
   }).format(Number(n || 0));
 }
 
-function formatDateTime(ts) {
-  if (!ts) return "—";
-  const d = new Date(ts * 1000 || ts); // support seconds / ms
+function toMs(tsLike) {
+  if (!tsLike) return 0;
+  // number seconds or ms
+  if (typeof tsLike === "number") {
+    if (tsLike > 1e12) return tsLike; // ms
+    if (tsLike > 1e9) return tsLike * 1000; // seconds
+    return 0;
+  }
+  // string numeric
+  const n = Number(tsLike);
+  if (Number.isFinite(n) && n > 0) return toMs(n);
+
+  // string date
+  const d = new Date(tsLike);
+  const ms = d.getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function parseCreatedFromOrderId(orderId) {
+  // order_id format: YINN-${Date.now()}-${RANDOM}
+  // contoh: YINN-1771405066821-A6008C
+  const m = String(orderId || "").match(/YINN-(\d{10,13})-/i);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return 0;
+  return n > 1e12 ? n : n * 1000;
+}
+
+function formatDateTime(ms) {
+  if (!ms) return "—";
+  const d = new Date(ms);
   return d.toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
@@ -171,8 +204,6 @@ async function qrDataUrlFromString(qrString) {
 export default function PayClient() {
   const sp = useSearchParams();
   const router = useRouter();
-  const timerRef = useRef(null);
-  const confirmingRef = useRef(false);
 
   const backend = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
@@ -180,7 +211,6 @@ export default function PayClient() {
   const method = sp.get("method") || "qris";
   const amountQ = Number(sp.get("amount") || 0) || 0;
 
-  // ✅ session disimpan di state, dibaca ulang pas mount (biar refresh aman)
   const [uid, setUid] = useState("");
   const [token, setToken] = useState("");
 
@@ -191,13 +221,18 @@ export default function PayClient() {
   const [amount, setAmount] = useState(amountQ);
   const [total, setTotal] = useState(amountQ);
   const [fee, setFee] = useState(0);
-  const [createdAt, setCreatedAt] = useState(0);
-  const [expiredAt, setExpiredAt] = useState(0);
+
+  const [createdMs, setCreatedMs] = useState(0);
+  const [expiredMs, setExpiredMs] = useState(0);
 
   const [qrString, setQrString] = useState("");
   const [qrUrl, setQrUrl] = useState("");
 
+  const timerRef = useRef(null);
+  const confirmingRef = useRef(false);
+
   const cacheKey = useMemo(() => (uid && order_id ? `deposit_qr:${uid}:${order_id}` : ""), [uid, order_id]);
+  const createdFallback = useMemo(() => parseCreatedFromOrderId(order_id), [order_id]);
 
   function stopAuto() {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -209,7 +244,6 @@ export default function PayClient() {
     timerRef.current = setInterval(() => checkNow(true), 3000);
   }
 
-  // ✅ baca session pas mount + tiap balik dari login
   useEffect(() => {
     if (typeof window === "undefined") return;
     const u = getActiveUserIdLoose();
@@ -218,14 +252,27 @@ export default function PayClient() {
     setToken(String(t || ""));
   }, []);
 
+  function applyMeta(meta) {
+    if (!meta) return;
+
+    if (meta.amount) setAmount(meta.amount);
+    if (meta.total) setTotal(meta.total);
+    if (meta.fee !== undefined) setFee(meta.fee);
+
+    // created/expired fallback
+    const cMs = toMs(meta.created_at) || createdFallback || Date.now();
+    const eMs = toMs(meta.expired_at) || (cMs ? cMs + DEFAULT_EXPIRE_MINUTES * 60 * 1000 : 0);
+
+    setCreatedMs(cMs);
+    setExpiredMs(eMs);
+  }
+
   async function fetchDetail(u, t) {
     if (!backend) throw new Error("Backend URL belum diset");
     if (!order_id) throw new Error("Order ID kosong");
     if (!u || !t) throw new Error("Session user tidak ketemu. Login dulu.");
 
     const headers = authHeaders(u, t);
-
-    // ✅ fallback endpoint: /deposit/detail , /deposit/detail.php
     const urls = [
       `${backend}/deposit/detail?order_id=${encodeURIComponent(order_id)}&user_id=${encodeURIComponent(u)}`,
       `${backend}/deposit/detail.php?order_id=${encodeURIComponent(order_id)}&user_id=${encodeURIComponent(u)}`,
@@ -235,16 +282,16 @@ export default function PayClient() {
     for (const url of urls) {
       try {
         const r = await fetch(url, { cache: "no-store", headers });
-        const ttxt = await r.text();
-        const j = safeJson(ttxt);
-        if (!r.ok || !j) throw new Error("Pakasir response tidak sesuai");
-        if (j?.ok === false) throw new Error(String(j?.message || "Pakasir response tidak sesuai"));
+        const txt = await r.text();
+        const j = safeJson(txt);
+        if (!r.ok || !j) throw new Error("Detail response invalid");
+        if (j?.ok === false) throw new Error(String(j?.message || "Detail error"));
         return j;
       } catch (e) {
         lastErr = e;
       }
     }
-    throw lastErr || new Error("Pakasir response tidak sesuai");
+    throw lastErr || new Error("Detail response invalid");
   }
 
   async function createTx(u, t) {
@@ -252,8 +299,6 @@ export default function PayClient() {
     if (!u || !t) throw new Error("Session user tidak ketemu. Login dulu.");
 
     const headers = authHeaders(u, t);
-
-    // ✅ fallback endpoint: /deposit/create , /deposit/create.php
     const urls = [`${backend}/deposit/create`, `${backend}/deposit/create.php`];
 
     let lastErr = null;
@@ -264,16 +309,16 @@ export default function PayClient() {
           headers,
           body: JSON.stringify({ user_id: u, order_id, amount: amount || amountQ || 2000, method }),
         });
-        const ttxt = await r.text();
-        const j = safeJson(ttxt);
-        if (!r.ok || !j) throw new Error("Create payment gagal (response invalid)");
-        if (j?.ok === false) throw new Error(String(j?.message || "Create payment gagal"));
+        const txt = await r.text();
+        const j = safeJson(txt);
+        if (!r.ok || !j) throw new Error("Create response invalid");
+        if (j?.ok === false) throw new Error(String(j?.message || "Create gagal"));
         return j;
       } catch (e) {
         lastErr = e;
       }
     }
-    throw lastErr || new Error("Create payment gagal");
+    throw lastErr || new Error("Create response invalid");
   }
 
   async function confirmDeposit(u, t) {
@@ -284,27 +329,22 @@ export default function PayClient() {
       const headers = authHeaders(u, t);
       const urls = [`${backend}/deposit/confirm`, `${backend}/deposit/confirm.php`];
 
-      let ok = false;
       let lastErr = null;
-
       for (const url of urls) {
         try {
           const r = await fetch(url, { method: "POST", headers, body: JSON.stringify({ user_id: u, order_id }) });
-          const ttxt = await r.text();
-          const j = safeJson(ttxt);
-          if (!r.ok || !j) throw new Error("Confirm gagal");
+          const txt = await r.text();
+          const j = safeJson(txt);
+          if (!r.ok || !j) throw new Error("Confirm response invalid");
           if (j?.ok === false) throw new Error(String(j?.message || "Confirm gagal"));
-          ok = true;
-          break;
+          toast.success("Deposit sukses ✅");
+          router.replace("/topup");
+          return;
         } catch (e) {
           lastErr = e;
         }
       }
-
-      if (!ok) throw lastErr || new Error("Confirm gagal");
-
-      toast.success("Deposit sukses ✅");
-      router.replace("/topup"); // balik ke deposit/home
+      throw lastErr || new Error("Confirm response invalid");
     } catch (e) {
       confirmingRef.current = false;
       toast.error(String(e?.message || "Gagal konfirmasi deposit"));
@@ -316,7 +356,19 @@ export default function PayClient() {
     setLoading(true);
 
     try {
-      // 1) detail dulu
+      // ✅ 0) kalau ada cache QR string, pakai dulu (biar refresh gak create ulang)
+      if (cacheKey) {
+        try {
+          const cached = localStorage.getItem(cacheKey);
+          if (cached) {
+            setQrString(cached);
+            const dataUrl = await qrDataUrlFromString(cached);
+            setQrUrl(dataUrl);
+          }
+        } catch {}
+      }
+
+      // ✅ 1) detail dulu (harusnya cukup untuk refresh)
       let d = null;
       try {
         d = await fetchDetail(u, t);
@@ -327,13 +379,7 @@ export default function PayClient() {
       if (d) {
         const st = normalizeStatus(d);
         setStatus(st);
-
-        const meta = pickMeta(d);
-        if (meta.amount) setAmount(meta.amount);
-        if (meta.total) setTotal(meta.total);
-        if (meta.fee !== undefined) setFee(meta.fee);
-        if (meta.created_at) setCreatedAt(meta.created_at);
-        if (meta.expired_at) setExpiredAt(meta.expired_at);
+        applyMeta(pickMeta(d));
 
         const pn = pickPaymentNumber(d);
         if (pn) {
@@ -342,21 +388,31 @@ export default function PayClient() {
           setQrUrl(dataUrl);
           if (cacheKey) localStorage.setItem(cacheKey, pn);
           setLoading(false);
+
+          // ✅ kalau udah completed, langsung confirm
+          if (st === "completed") {
+            await confirmDeposit(u, t);
+          }
           return true;
         }
       }
 
-      // 2) kalau belum ada payment_number -> create
+      // ✅ 2) kalau belum ada payment number:
+      // hanya create kalau belum pernah create (biar gak spam create pas refresh)
+      const createdFlagKey = uid && order_id ? `deposit_created:${uid}:${order_id}` : "";
+      const alreadyCreated = createdFlagKey ? localStorage.getItem(createdFlagKey) === "1" : false;
+
+      if (alreadyCreated) {
+        // udah pernah create tapi detail gak ngasih -> jangan create lagi, tampil error yang benar
+        throw new Error("Detail belum mengembalikan QR. Coba cek sekarang / tunggu sebentar.");
+      }
+
       const c = await createTx(u, t);
+      if (createdFlagKey) localStorage.setItem(createdFlagKey, "1");
+
       const st2 = normalizeStatus(c);
       setStatus(st2);
-
-      const meta2 = pickMeta(c);
-      if (meta2.amount) setAmount(meta2.amount);
-      if (meta2.total) setTotal(meta2.total);
-      if (meta2.fee !== undefined) setFee(meta2.fee);
-      if (meta2.created_at) setCreatedAt(meta2.created_at);
-      if (meta2.expired_at) setExpiredAt(meta2.expired_at);
+      applyMeta(pickMeta(c));
 
       const pn2 = pickPaymentNumber(c);
       if (!pn2) throw new Error("QRIS string kosong dari backend");
@@ -382,20 +438,14 @@ export default function PayClient() {
       const d = await fetchDetail(uid, token);
       const st = normalizeStatus(d);
       setStatus(st);
-
-      const meta = pickMeta(d);
-      if (meta.amount) setAmount(meta.amount);
-      if (meta.total) setTotal(meta.total);
-      if (meta.fee !== undefined) setFee(meta.fee);
-      if (meta.created_at) setCreatedAt(meta.created_at);
-      if (meta.expired_at) setExpiredAt(meta.expired_at);
+      applyMeta(pickMeta(d));
 
       if (st === "completed") {
         await confirmDeposit(uid, token);
         return true;
       }
 
-      if (!silent) toast(st === "pending" ? "Masih pending…" : `Status: ${st}`);
+      if (!silent) toast(st === "pending" ? "Masih menunggu pembayaran…" : `Status: ${st}`);
       return true;
     } catch (e) {
       if (!silent) toast.error(String(e?.message || "Gagal cek status"));
@@ -418,19 +468,11 @@ export default function PayClient() {
     }
   }
 
-  // MAIN FLOW
+  // FLOW
   useEffect(() => {
     if (!order_id) {
       router.replace("/topup");
       return;
-    }
-
-    // ✅ kalau refresh, baca ulang session SEKARANG (biar gak ngandelin memo lama)
-    const u = typeof window === "undefined" ? "" : getActiveUserIdLoose();
-    const t = typeof window === "undefined" ? "" : getTokenLoose(u);
-    if (u && t) {
-      setUid(u);
-      setToken(t);
     }
   }, [order_id, router]);
 
@@ -444,16 +486,10 @@ export default function PayClient() {
       return;
     }
 
-    // kalau ada cache QR string, render cepat
-    if (cacheKey) {
-      try {
-        const cached = localStorage.getItem(cacheKey);
-        if (cached && !qrString) {
-          setQrString(cached);
-          qrDataUrlFromString(cached).then(setQrUrl).catch(() => {});
-        }
-      } catch {}
-    }
+    // set fallback created/expired cepat biar gak blank
+    const c0 = createdFallback || Date.now();
+    setCreatedMs(c0);
+    setExpiredMs(c0 + DEFAULT_EXPIRE_MINUTES * 60 * 1000);
 
     let mounted = true;
 
@@ -485,18 +521,16 @@ export default function PayClient() {
           <div className="text-sm text-[var(--yinn-muted)]">
             Nominal: <span className="font-semibold">{formatIDR(amount || amountQ)}</span>
           </div>
-
           <div className="text-sm text-[var(--yinn-muted)]">
             Fee: <span className="font-semibold">{formatIDR(fee)}</span>
           </div>
-
           <div className="text-sm text-[var(--yinn-muted)]">
             Total: <span className="font-semibold">{formatIDR(total || amountQ)}</span>
           </div>
 
           <div className="mt-2 flex items-center justify-between text-xs text-[var(--yinn-muted)]">
-            <span>Dibuat: {createdAt ? formatDateTime(createdAt) : "—"}</span>
-            <span>Expired: {expiredAt ? formatDateTime(expiredAt) : "—"}</span>
+            <span>Dibuat: {createdMs ? formatDateTime(createdMs) : "—"}</span>
+            <span>Expired: {expiredMs ? formatDateTime(expiredMs) : "—"}</span>
           </div>
 
           <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] p-4">
@@ -508,7 +542,6 @@ export default function PayClient() {
                 <div className="mt-3 flex gap-2">
                   <button
                     onClick={() => {
-                      // coba re-read session (buat kasus user baru login di tab lain)
                       const u = getActiveUserIdLoose();
                       const t = getTokenLoose(u);
                       setUid(u);
@@ -535,7 +568,7 @@ export default function PayClient() {
               <div className="text-sm font-bold text-[var(--yinn-muted)]">Menyiapkan pembayaran…</div>
             ) : qrUrl ? (
               <>
-                {/* HOLOGRAM SIMPLE (BRIMO-LIKE FEEL) */}
+                {/* HOLOGRAM BOX */}
                 <div
                   className="relative overflow-hidden rounded-2xl border border-[var(--yinn-border)] p-4"
                   style={{
@@ -597,12 +630,10 @@ export default function PayClient() {
                   </Link>
                 </div>
 
-                {/* debug kecil biar gampang kalau ada masalah */}
-                {qrString ? (
-                  <div className="mt-3 rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3 text-[11px] text-[var(--yinn-muted)]">
-                    QR Raw: {qrString.slice(0, 80)}{qrString.length > 80 ? "…" : ""}
-                  </div>
-                ) : null}
+                {/* ✅ QR RAW disembunyikan (buat keamanan + gak jelek) */}
+                <div className="mt-3 rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3 text-[11px] text-[var(--yinn-muted)]">
+                  QR Raw disembunyikan (aman). Kalau butuh, klik tombol Download.
+                </div>
               </>
             ) : (
               <div className="text-sm font-bold text-[var(--yinn-muted)]">QR belum tersedia. Coba lagi.</div>

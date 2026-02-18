@@ -2,21 +2,19 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
+import QRCode from "qrcode";
 
-function makeOrderId() {
-  // contoh: DEP-1700000000000-AB12CD
-  const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `DEP-${Date.now()}-${rand}`;
+function formatIDR(n) {
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(n) ? n : 0);
 }
 
 export default function PayClient() {
   const sp = useSearchParams();
   const router = useRouter();
-
-  const [status, setStatus] = useState("loading"); // loading | ready | error
-  const [error, setError] = useState("");
-  const [paymentUrl, setPaymentUrl] = useState("");
 
   const amount = useMemo(() => {
     const raw = sp.get("amount") || sp.get("nominal") || "";
@@ -24,143 +22,207 @@ export default function PayClient() {
     return Number.isFinite(n) ? n : 0;
   }, [sp]);
 
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [payment, setPayment] = useState(null);
+  const [qrImg, setQrImg] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [ttl, setTtl] = useState(""); // countdown string
+
+  // create transaksi + generate QR image
   useEffect(() => {
-    // Wajib ada amount
-    if (!amount || amount < 1000) {
-      setStatus("error");
-      setError("Nominal tidak valid. Balik ke halaman deposit dan pilih nominal.");
-      return;
-    }
+    let alive = true;
 
-    const project =
-      process.env.NEXT_PUBLIC_PAKASIR_PROJECT ||
-      process.env.NEXT_PUBLIC_PAKASIR_SLUG ||
-      "";
+    async function run() {
+      setLoading(true);
+      setErr("");
 
-    if (!project) {
-      setStatus("error");
-      setError("ENV Pakasir belum diisi: NEXT_PUBLIC_PAKASIR_PROJECT (slug proyek).");
-      return;
-    }
-
-    // Biar kalau reload gak bikin order_id baru terus
-    const key = `yinnotp_depo_${amount}`;
-    let orderId = "";
-    try {
-      orderId = sessionStorage.getItem(key) || "";
-      if (!orderId) {
-        orderId = makeOrderId();
-        sessionStorage.setItem(key, orderId);
+      if (!amount || amount < 1000) {
+        setErr("Nominal tidak valid. Balik dan pilih nominal.");
+        setLoading(false);
+        return;
       }
-    } catch {
-      orderId = makeOrderId();
-    }
 
-    const origin =
-      process.env.NEXT_PUBLIC_APP_URL ||
-      (typeof window !== "undefined" ? window.location.origin : "");
-
-    const successUrl = `${origin}/topup/success?order_id=${encodeURIComponent(
-      orderId
-    )}&amount=${encodeURIComponent(String(amount))}`;
-
-    // Pakasir hosted page (langsung QRIS), ini yang harus kebuka:
-    const url =
-      `https://app.pakasir.com/pay/${encodeURIComponent(project)}/${encodeURIComponent(
-        String(amount)
-      )}` +
-      `?order_id=${encodeURIComponent(orderId)}` +
-      `&qris_only=1` +
-      `&redirect=${encodeURIComponent(successUrl)}`;
-
-    setPaymentUrl(url);
-    setStatus("ready");
-
-    // ✅ Redirect external HARUS pakai window.location (router.push suka gak jalan buat external)
-    const t = setTimeout(() => {
+      // biar reload gak bikin order baru terus
+      const key = `yinnotp_order_${amount}`;
+      let order_id = "";
       try {
-        window.location.replace(url);
-      } catch (e) {
-        setStatus("error");
-        setError("Gagal redirect otomatis. Silakan klik tombol Lanjut.");
+        order_id = sessionStorage.getItem(key) || "";
+        if (!order_id) {
+          order_id = `DEP-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+          sessionStorage.setItem(key, order_id);
+        }
+      } catch {
+        order_id = `DEP-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
       }
-    }, 400);
 
-    return () => clearTimeout(t);
+      try {
+        const r = await fetch("/api/deposit/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount, order_id, method: "qris" }),
+        });
+
+        const data = await r.json();
+        if (!r.ok || !data?.ok) throw new Error(data?.message || "Gagal create transaksi");
+
+        const p = data.payment;
+        if (!alive) return;
+
+        setPayment(p);
+
+        // Generate QR image dari payment_number (QR string)
+        const dataUrl = await QRCode.toDataURL(p.payment_number, {
+          margin: 1,
+          width: 280,
+        });
+
+        if (!alive) return;
+        setQrImg(dataUrl);
+      } catch (e) {
+        if (!alive) return;
+        setErr(String(e?.message || e));
+      } finally {
+        if (!alive) return;
+        setLoading(false);
+      }
+    }
+
+    run();
+    return () => {
+      alive = false;
+    };
   }, [amount]);
 
+  // countdown expired
+  useEffect(() => {
+    if (!payment?.expired_at) return;
+
+    const tick = () => {
+      const end = new Date(payment.expired_at).getTime();
+      const now = Date.now();
+      const diff = Math.max(0, end - now);
+
+      const m = Math.floor(diff / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      setTtl(`${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
+
+      if (diff <= 0) setTtl("00:00");
+    };
+
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [payment?.expired_at]);
+
+  async function checkStatus() {
+    if (!payment?.order_id || !payment?.amount) return;
+    setChecking(true);
+    try {
+      const r = await fetch(
+        `/api/deposit/detail?order_id=${encodeURIComponent(payment.order_id)}&amount=${encodeURIComponent(
+          String(payment.amount)
+        )}`,
+        { cache: "no-store" }
+      );
+      const data = await r.json();
+      if (!r.ok || !data?.ok) throw new Error(data?.message || "Gagal cek status");
+
+      const status = data.transaction?.status;
+      if (status === "completed") {
+        router.replace(`/topup/success?order_id=${encodeURIComponent(payment.order_id)}&amount=${encodeURIComponent(String(payment.amount))}`);
+        return;
+      }
+
+      alert(`Status masih: ${status || "unknown"}`);
+    } catch (e) {
+      alert(String(e?.message || e));
+    } finally {
+      setChecking(false);
+    }
+  }
+
   return (
-    <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)] px-4 py-10">
+    <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)] px-4 py-8">
       <div className="mx-auto max-w-[520px]">
         <div
           className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-5"
           style={{ boxShadow: "var(--yinn-soft)" }}
         >
-          {status === "loading" ? (
-            <>
-              <div className="text-base font-extrabold">Menyiapkan pembayaran...</div>
-              <div className="mt-1 text-sm text-[var(--yinn-muted)]">
-                Jangan tutup halaman ini.
-              </div>
-            </>
+          <div className="text-lg font-extrabold">Deposit via QRIS</div>
+          <div className="mt-1 text-sm text-[var(--yinn-muted)]">
+            Scan QR di bawah, lalu tekan <b>Saya sudah membayar</b>.
+          </div>
+
+          {amount ? (
+            <div className="mt-2 text-sm">
+              Nominal: <span className="font-extrabold">{formatIDR(amount)}</span>
+            </div>
           ) : null}
 
-          {status === "ready" ? (
-            <>
-              <div className="text-base font-extrabold">Menyiapkan pembayaran...</div>
-              <div className="mt-1 text-sm text-[var(--yinn-muted)]">
-                Kalau tidak pindah otomatis, klik tombol di bawah.
-              </div>
-
-              <div className="mt-4 flex gap-2">
-                <a
-                  href={paymentUrl}
-                  className="rounded-xl px-4 py-2 text-sm font-extrabold text-white"
-                  style={{
-                    background:
-                      "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
-                  }}
-                >
-                  Lanjut ke QRIS
-                </a>
-
-                <button
-                  onClick={() => router.replace("/topup")}
-                  className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-2 text-sm font-bold"
-                >
-                  Batal
-                </button>
-              </div>
-            </>
+          {payment?.total_payment ? (
+            <div className="mt-1 text-sm text-[var(--yinn-muted)]">
+              Total bayar: <span className="font-bold">{formatIDR(Number(payment.total_payment))}</span>
+              {ttl ? <span className="ms-2">• Exp: <b>{ttl}</b></span> : null}
+            </div>
           ) : null}
 
-          {status === "error" ? (
-            <>
-              <div className="text-base font-extrabold">Gagal menyiapkan pembayaran</div>
-              <div className="mt-2 text-sm text-[var(--yinn-muted)]">{error}</div>
+          {loading ? (
+            <div className="mt-6 text-sm text-[var(--yinn-muted)]">Menyiapkan QR...</div>
+          ) : null}
 
-              <div className="mt-4 flex gap-2">
-                <Link
-                  href="/topup"
-                  className="rounded-xl px-4 py-2 text-sm font-extrabold text-white"
-                  style={{
-                    background:
-                      "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
-                  }}
-                >
-                  Balik ke Deposit
-                </Link>
+          {err ? (
+            <div className="mt-4 rounded-xl border border-[var(--yinn-border)] p-3 text-sm">
+              <div className="font-bold">Error</div>
+              <div className="mt-1 text-[var(--yinn-muted)]">{err}</div>
+              <button
+                onClick={() => router.replace("/topup")}
+                className="mt-3 rounded-xl px-4 py-2 text-sm font-extrabold text-white"
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                }}
+              >
+                Balik ke Deposit
+              </button>
+            </div>
+          ) : null}
 
-                {paymentUrl ? (
-                  <a
-                    href={paymentUrl}
-                    className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-2 text-sm font-bold"
-                  >
-                    Coba buka QRIS
-                  </a>
-                ) : null}
+          {!loading && !err && qrImg ? (
+            <div className="mt-5 grid place-items-center">
+              <img
+                src={qrImg}
+                alt="QRIS"
+                className="rounded-2xl border border-[var(--yinn-border)] bg-white p-3"
+                style={{ width: 320, maxWidth: "100%", boxShadow: "var(--yinn-soft)" }}
+              />
+              <div className="mt-3 text-xs text-[var(--yinn-muted)] text-center">
+                Order ID: <span className="font-semibold">{payment?.order_id}</span>
               </div>
-            </>
+            </div>
+          ) : null}
+
+          {!loading && !err ? (
+            <div className="mt-5 flex gap-2">
+              <button
+                onClick={checkStatus}
+                disabled={checking}
+                className="flex-1 rounded-xl px-4 py-3 text-sm font-extrabold text-white disabled:opacity-70"
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                }}
+              >
+                {checking ? "Mengecek..." : "Saya sudah membayar"}
+              </button>
+
+              <button
+                onClick={() => router.replace("/topup")}
+                className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-3 text-sm font-bold"
+              >
+                Batal
+              </button>
+            </div>
           ) : null}
         </div>
       </div>

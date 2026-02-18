@@ -10,7 +10,10 @@ const TTL = 12 * 60 * 60 * 1000;
 function safeJson(text) {
   try {
     if (!text) return null;
-    return JSON.parse(text);
+    // kalau server balikin HTML (error page), jangan dipaksa JSON
+    const t = String(text).trim();
+    if (t.startsWith("<!DOCTYPE") || t.startsWith("<html") || t.startsWith("<HTML")) return null;
+    return JSON.parse(t);
   } catch {
     return null;
   }
@@ -62,118 +65,88 @@ function getToken() {
   }
 }
 
-function authHeaders(uid, token) {
+function authHeaders(uid) {
+  const token = getToken();
   const h = { "Content-Type": "application/json" };
   if (uid) h["X-User-Id"] = uid;
   if (token) {
-    h["Authorization"] = `Bearer ${token}`;
     h["X-Token"] = token;
+    h["Authorization"] = `Bearer ${token}`;
   }
   return h;
 }
 
-function pickStatus(j) {
-  const raw =
-    j?.status ??
-    j?.transaction?.status ??
-    j?.data?.status ??
-    j?.data?.transaction?.status ??
-    j?.payment?.status ??
-    j?.data?.payment?.status ??
-    "";
-
+function normalizeStatus(raw) {
   const s = String(raw || "").toLowerCase();
-  if (["completed", "paid", "success", "settlement", "done"].includes(s)) return "completed";
-  if (["pending", "process", "processing", "waiting", "unpaid"].includes(s)) return "pending";
-  if (["failed", "expired", "expire", "cancel", "canceled", "cancelled"].includes(s)) return "failed";
-  return s || "pending";
+  if (["paid", "success", "sukses", "completed", "settlement", "done"].includes(s)) return "completed";
+  if (["pending", "process", "processing", "menunggu", "unpaid", "waiting"].includes(s)) return "pending";
+  if (["expire", "expired", "failed", "cancel", "canceled", "cancelled"].includes(s)) return "failed";
+  return s || "unknown";
 }
 
-function pickAmount(j, fallback = 0) {
-  const a = j?.amount ?? j?.transaction?.amount ?? j?.payment?.amount ?? j?.data?.amount ?? j?.data?.payment?.amount;
-  const n = Number(a || 0) || 0;
-  return n || Number(fallback || 0) || 0;
+function formatIDR(n) {
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(Number(n || 0));
 }
 
-function pickFee(j) {
-  const f = j?.fee ?? j?.payment?.fee ?? j?.data?.fee ?? j?.data?.payment?.fee;
-  return Number(f || 0) || 0;
-}
-
-function pickTotal(j, fallback = 0) {
-  const t =
-    j?.total_payment ??
-    j?.payment?.total_payment ??
-    j?.data?.total_payment ??
-    j?.data?.payment?.total_payment;
-  const n = Number(t || 0) || 0;
-  return n || Number(fallback || 0) || 0;
-}
-
-function pickPaymentNumber(j) {
-  // backend kamu: payment.payment_number (string QR)
-  return (
-    j?.payment_number ||
-    j?.payment?.payment_number ||
-    j?.data?.payment_number ||
-    j?.data?.payment?.payment_number ||
-    j?.payment?.qr_string ||
-    j?.data?.payment?.qr_string ||
-    j?.qr ||
-    j?.qr_image ||
-    j?.qr_url ||
-    j?.data?.qr ||
-    j?.data?.qr_image ||
-    j?.data?.qr_url ||
-    ""
-  );
-}
-
-async function toQrDataUrl(value) {
-  // kalau value sudah URL gambar (http/data:image) => return apa adanya
-  const v = String(value || "");
-  if (!v) return "";
-  if (v.startsWith("data:image/")) return v;
-  if (v.startsWith("http://") || v.startsWith("https://")) return v;
-
-  // kalau string QR => render jadi PNG dataURL
-  const QRCode = (await import("qrcode")).default;
-  return await QRCode.toDataURL(v, { errorCorrectionLevel: "M", margin: 1, scale: 8 });
+function fmtDate(ts) {
+  if (!ts) return "—";
+  const d = new Date(Number(ts) * (String(ts).length <= 10 ? 1000 : 1)); // support unix seconds/millis
+  return d.toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function PayClient() {
   const sp = useSearchParams();
   const router = useRouter();
 
-  const backend = useMemo(() => normBackend(process.env.NEXT_PUBLIC_BACKEND_URL), []);
+  const backend = normBackend(process.env.NEXT_PUBLIC_BACKEND_URL);
 
-  const method = sp.get("method") || "qris";
-  const amountParam = sp.get("amount") || "0";
   const order_id = sp.get("order_id") || "";
   const resume = sp.get("resume") === "1";
 
-  const uid = useMemo(() => (typeof window === "undefined" ? "" : getActiveUserId()), []);
-  const token = useMemo(() => (typeof window === "undefined" ? "" : getToken()), []);
+  // jangan pakai useMemo([]) buat uid/token — pas refresh kadang ke-lock value kosong
+  const [uid, setUid] = useState("");
+  const [token, setToken] = useState("");
 
-  const isLoggedIn = Boolean(uid && token);
-  const headers = useMemo(() => authHeaders(uid, token), [uid, token]);
+  // query fallback (kadang kosong pas resume)
+  const qpMethod = sp.get("method") || "qris";
+  const qpAmount = Number(sp.get("amount") || 0) || 0;
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  const [qrUrl, setQrUrl] = useState(""); // dataUrl / image url
-  const [qrRaw, setQrRaw] = useState(""); // string QR (optional)
+  const [qr, setQr] = useState(""); // image url / data url
   const [status, setStatus] = useState("pending");
-  const [fee, setFee] = useState(0);
 
-  const [amount, setAmount] = useState(Number(amountParam || 0) || 0);
-  const [total, setTotal] = useState(Number(amountParam || 0) || 0);
+  const [amount, setAmount] = useState(qpAmount);
+  const [fee, setFee] = useState(0);
+  const [total, setTotal] = useState(qpAmount);
+
+  const [createdAt, setCreatedAt] = useState(null);
+  const [expiredAt, setExpiredAt] = useState(null);
 
   const confirmedRef = useRef(false);
-  const toastErrOnceRef = useRef(false);
   const timerRef = useRef(null);
+  const toastErrOnceRef = useRef(false);
 
-  const cacheKey = useMemo(() => (uid && order_id ? `deposit_qr:${uid}:${order_id}` : ""), [uid, order_id]);
+  const cacheKey = useMemo(() => {
+    if (!uid || !order_id) return "";
+    return `deposit_qr:${uid}:${order_id}`;
+  }, [uid, order_id]);
+
+  const metaKey = useMemo(() => {
+    if (!uid || !order_id) return "";
+    return `deposit_meta:${uid}:${order_id}`;
+  }, [uid, order_id]);
 
   function stopPolling() {
     if (timerRef.current) {
@@ -182,207 +155,332 @@ export default function PayClient() {
     }
   }
 
-  async function syncMeAfterSuccess() {
-    if (!backend || !uid) return;
-    try {
-      const r = await fetch(`${backend}/deposit/me.php?user_id=${encodeURIComponent(uid)}`, {
-        cache: "no-store",
-        headers,
-      });
-      const t = await r.text();
-      const j = safeJson(t);
-      if (!r.ok || !j?.ok) return;
+  async function fetchAnyJson(url, opt) {
+    const r = await fetch(url, opt);
+    const t = await r.text();
+    const j = safeJson(t);
+    return { r, t, j };
+  }
 
-      const bal = Number(j.balance || 0) || 0;
-      const hist = Array.isArray(j.history) ? j.history : [];
+  async function getDetail() {
+    if (!backend) throw new Error("Backend URL belum diset");
+    if (!order_id) throw new Error("Order ID kosong");
+    if (!uid || !token) throw new Error("Session user tidak ketemu. Login dulu.");
 
-      localStorage.setItem(`yinnotp_balance:${uid}`, String(bal));
-      localStorage.setItem(`yinnotp_deposit_history:${uid}`, JSON.stringify(hist));
-      localStorage.setItem(`yinnotp_last_sync:${uid}`, String(Date.now()));
+    // coba route dulu, kalau gagal baru .php (biar aman)
+    const urls = [
+      `${backend}/deposit/detail?order_id=${encodeURIComponent(order_id)}&user_id=${encodeURIComponent(uid)}`,
+      `${backend}/deposit/detail.php?order_id=${encodeURIComponent(order_id)}&user_id=${encodeURIComponent(uid)}`,
+    ];
 
-      // legacy
-      localStorage.setItem("yinnotp_balance", String(bal));
-      localStorage.setItem("yinnotp_deposit_history", JSON.stringify(hist));
-    } catch {}
+    let lastErr = null;
+    for (const url of urls) {
+      try {
+        const { r, j } = await fetchAnyJson(url, { cache: "no-store", headers: authHeaders(uid) });
+        if (!r.ok || !j) {
+          lastErr = new Error(`Detail invalid (HTTP ${r.status})`);
+          continue;
+        }
+        if (j?.ok === false) {
+          lastErr = new Error(String(j?.message || "Detail gagal"));
+          continue;
+        }
+        return j;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("Pakasir response tidak sesuai");
+  }
+
+  function pickFromDetail(d) {
+    // fleksibel sama format backend kamu
+    const st = normalizeStatus(d?.status || d?.data?.status || d?.payment?.status || d?.data?.payment?.status);
+
+    const amt =
+      Number(d?.amount || d?.data?.amount || d?.payment?.amount || d?.data?.payment?.amount || amount || 0) || 0;
+
+    const feeV =
+      Number(d?.fee || d?.data?.fee || d?.payment?.fee || d?.data?.payment?.fee || 0) || 0;
+
+    const totalV =
+      Number(
+        d?.total_payment ||
+          d?.data?.total_payment ||
+          d?.payment?.total_payment ||
+          d?.data?.payment?.total_payment ||
+          (amt + feeV)
+      ) || 0;
+
+    const qrV =
+      d?.qr ||
+      d?.qr_image ||
+      d?.qr_url ||
+      d?.data?.qr ||
+      d?.data?.qr_image ||
+      d?.data?.qr_url ||
+      d?.payment?.qr ||
+      d?.payment?.qr_image ||
+      d?.payment?.qr_url ||
+      d?.data?.payment?.qr ||
+      "";
+
+    const created =
+      d?.created_at || d?.data?.created_at || d?.payment?.created_at || d?.data?.payment?.created_at || null;
+
+    const expired =
+      d?.expired_at || d?.data?.expired_at || d?.payment?.expired_at || d?.data?.payment?.expired_at || null;
+
+    return { st, amt, feeV, totalV, qrV, created, expired };
   }
 
   async function createTx() {
     if (!backend) throw new Error("Backend URL belum diset");
-    if (!uid || !token) throw new Error("Session user tidak ketemu. Login dulu ya.");
-    if (!order_id) throw new Error("Order ID kosong");
+    if (!uid || !token) throw new Error("Session user tidak ketemu. Login dulu.");
 
     const body = {
       user_id: uid,
       order_id,
-      method,
-      amount: Number(amountParam || 0) || 0,
+      method: "qris", // keep qris only biar konsisten
+      amount: Number(amount || qpAmount || 2000) || 2000,
     };
 
-    const r = await fetch(`${backend}/deposit/create.php`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    });
+    const urls = [
+      `${backend}/deposit/create`,
+      `${backend}/deposit/create.php`,
+    ];
 
-    const t = await r.text();
-    const j = safeJson(t);
-    if (!r.ok || !j?.ok) throw new Error(String(j?.message || "Gagal buat transaksi"));
+    let lastErr = null;
 
-    const st = pickStatus(j);
-    const a = pickAmount(j, body.amount);
-    const f = pickFee(j);
-    const tp = pickTotal(j, a);
-    const payNum = pickPaymentNumber(j);
-
-    setStatus(st);
-    setAmount(a);
-    setFee(f);
-    setTotal(tp);
-
-    if (!payNum) throw new Error("QR belum tersedia (payment_number kosong)");
-
-    setQrRaw(String(payNum));
-    const url = await toQrDataUrl(payNum);
-    setQrUrl(url);
-
-    if (cacheKey) {
+    for (const url of urls) {
       try {
-        localStorage.setItem(cacheKey, url);
-        localStorage.setItem(`${cacheKey}:raw`, String(payNum));
-      } catch {}
+        const { r, j } = await fetchAnyJson(url, {
+          method: "POST",
+          headers: authHeaders(uid),
+          body: JSON.stringify(body),
+        });
+
+        if (!r.ok || !j) {
+          lastErr = new Error(`Create invalid (HTTP ${r.status})`);
+          continue;
+        }
+        if (j?.ok === false) {
+          lastErr = new Error(String(j?.message || "Gagal buat transaksi"));
+          continue;
+        }
+
+        // QR value (kalau backend ngirim langsung image url/dataurl)
+        const qrV =
+          j.qr || j.qr_image || j.qr_url || j.data?.qr || j.data?.qr_image || j.data?.qr_url || "";
+
+        // meta
+        const feeV = Number(j.fee || j.data?.fee || 0) || 0;
+        const totalV = Number(j.total_payment || j.data?.total_payment || j.total || j.data?.total || 0) || 0;
+
+        const expired = j.expired_at || j.data?.expired_at || j.payment?.expired_at || null;
+
+        return { qrV, feeV, totalV, expired };
+      } catch (e) {
+        lastErr = e;
+      }
     }
 
-    return j;
+    throw lastErr || new Error("Gagal buat transaksi");
   }
 
-  async function getDetail() {
-    if (!backend || !order_id) return null;
-
-    // NOTE: backend kamu detail.php minimal butuh order_id
-    const u = `${backend}/deposit/detail.php?order_id=${encodeURIComponent(order_id)}${
-      uid ? `&user_id=${encodeURIComponent(uid)}` : ""
-    }`;
-
-    const r = await fetch(u, { cache: "no-store", headers });
-    const t = await r.text();
-    const j = safeJson(t);
-    if (!r.ok || !j) return null;
-    return j;
-  }
-
-  async function confirmIfCompleted() {
+  async function confirmDeposit() {
     if (confirmedRef.current) return;
     confirmedRef.current = true;
 
+    const urls = [
+      `${backend}/deposit/confirm`,
+      `${backend}/deposit/confirm.php`,
+    ];
+
     try {
-      const r = await fetch(`${backend}/deposit/confirm.php`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ user_id: uid, order_id }),
-      });
-      const t = await r.text();
-      const j = safeJson(t);
+      let ok = false;
+      let msg = "";
+      for (const url of urls) {
+        const { r, j } = await fetchAnyJson(url, {
+          method: "POST",
+          headers: authHeaders(uid),
+          body: JSON.stringify({ user_id: uid, order_id }),
+        });
 
-      if (!r.ok || !j?.ok) {
-        confirmedRef.current = false;
-        throw new Error(String(j?.message || "Gagal konfirmasi deposit"));
+        if (r.ok && j?.ok) {
+          ok = true;
+          msg = j?.message || "";
+          break;
+        }
       }
+      if (!ok) throw new Error(msg || "Gagal konfirmasi deposit");
 
-      await syncMeAfterSuccess();
       toast.success("Deposit sukses ✅", { id: "dep-ok" });
-
       stopPolling();
-      router.replace(
-        `/topup/success?order_id=${encodeURIComponent(order_id)}&amount=${encodeURIComponent(String(amount || amountParam || 0))}`
-      );
+
+      // redirect ke halaman deposit biar balance/riwayat kebaca
+      router.replace("/topup");
     } catch (e) {
+      confirmedRef.current = false;
       toast.error(String(e?.message || "Gagal konfirmasi deposit"), { id: "dep-confirm-fail" });
     }
   }
 
-  async function ensureQR() {
+  async function ensureLoaded() {
     setErr("");
     setLoading(true);
 
-    // 1) resume: pakai cache QR dulu biar instan
-    if (resume && cacheKey) {
-      try {
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) setQrUrl(cached);
-        const raw = localStorage.getItem(`${cacheKey}:raw`);
-        if (raw) setQrRaw(raw);
-      } catch {}
-    }
-
     try {
-      // 2) coba detail dulu
-      const d = await getDetail();
-      const st = pickStatus(d);
-      setStatus(st);
+      // 1) kalau resume, coba load meta cache dulu (biar refresh gak blank)
+      if (resume && metaKey) {
+        try {
+          const m = safeJson(localStorage.getItem(metaKey));
+          if (m?.amount) setAmount(Number(m.amount) || 0);
+          if (m?.fee != null) setFee(Number(m.fee) || 0);
+          if (m?.total) setTotal(Number(m.total) || 0);
+          if (m?.createdAt) setCreatedAt(m.createdAt);
+          if (m?.expiredAt) setExpiredAt(m.expiredAt);
+        } catch {}
+      }
 
-      const a = pickAmount(d, Number(amountParam || 0));
-      const f = pickFee(d);
-      const tp = pickTotal(d, a);
+      if (resume && cacheKey) {
+        try {
+          const cachedQR = localStorage.getItem(cacheKey);
+          if (cachedQR) setQr(cachedQR);
+        } catch {}
+      }
 
-      setAmount(a);
-      setFee(f);
-      setTotal(tp);
+      // 2) try detail
+      let d = null;
+      try {
+        d = await getDetail();
+      } catch (e) {
+        d = null;
+      }
 
-      const payNum = pickPaymentNumber(d);
+      if (d) {
+        const p = pickFromDetail(d);
+        setStatus(p.st);
+        if (p.amt) setAmount(p.amt);
+        setFee(p.feeV || 0);
+        setTotal(p.totalV || (p.amt + p.feeV));
+        setCreatedAt(p.created);
+        setExpiredAt(p.expired);
 
-      if (payNum) {
-        setQrRaw(String(payNum));
-        const url = await toQrDataUrl(payNum);
-        setQrUrl(url);
-        if (cacheKey) {
-          try {
-            localStorage.setItem(cacheKey, url);
-            localStorage.setItem(`${cacheKey}:raw`, String(payNum));
-          } catch {}
+        if (p.qrV) {
+          setQr(String(p.qrV));
+          if (cacheKey) localStorage.setItem(cacheKey, String(p.qrV));
         }
-      } else if (!qrUrl) {
-        // 3) kalau detail belum punya QR => create
-        await createTx();
+
+        // simpan meta biar refresh aman
+        if (metaKey) {
+          localStorage.setItem(
+            metaKey,
+            JSON.stringify({
+              amount: p.amt,
+              fee: p.feeV,
+              total: p.totalV || (p.amt + p.feeV),
+              createdAt: p.created,
+              expiredAt: p.expired,
+            })
+          );
+        }
+
+        // kalau sudah completed, langsung confirm + redirect
+        if (p.st === "completed") {
+          setLoading(false);
+          await confirmDeposit();
+          return;
+        }
+      }
+
+      // 3) kalau QR belum ada, create
+      if (!qr) {
+        const c = await createTx();
+        if (c?.qrV) {
+          setQr(String(c.qrV));
+          if (cacheKey) localStorage.setItem(cacheKey, String(c.qrV));
+        }
+        if (c?.feeV != null) setFee(Number(c.feeV) || 0);
+        if (c?.totalV) setTotal(Number(c.totalV) || 0);
+        if (c?.expired) setExpiredAt(c.expired);
+
+        // simpan meta
+        if (metaKey) {
+          localStorage.setItem(
+            metaKey,
+            JSON.stringify({
+              amount: Number(amount || qpAmount || 2000) || 2000,
+              fee: Number(c?.feeV || 0) || 0,
+              total: Number(c?.totalV || 0) || 0,
+              createdAt: createdAt || null,
+              expiredAt: c?.expired || expiredAt || null,
+            })
+          );
+        }
       }
 
       setLoading(false);
-      return true;
     } catch (e) {
       setLoading(false);
-      setErr(String(e?.message || "Gagal memuat pembayaran"));
-      return false;
+      const m = String(e?.message || "Pakasir response tidak sesuai");
+      setErr(m);
+      if (!toastErrOnceRef.current) {
+        toastErrOnceRef.current = true;
+        toast.error(m, { id: "pay-load-fail" });
+      }
     }
   }
 
-  function startPolling() {
-    stopPolling();
-    timerRef.current = setInterval(async () => {
-      try {
-        const d = await getDetail();
-        const st = pickStatus(d);
-        if (st) setStatus(st);
+  async function pollOnce() {
+    try {
+      const d = await getDetail();
+      const p = pickFromDetail(d);
+      if (p.st) setStatus(p.st);
+      if (p.amt) setAmount(p.amt);
+      setFee(p.feeV || 0);
+      setTotal(p.totalV || (p.amt + p.feeV));
+      setCreatedAt(p.created);
+      setExpiredAt(p.expired);
 
-        if (st === "completed") {
-          await confirmIfCompleted();
-        }
-      } catch {
-        // silent
+      if (p.qrV && !qr) {
+        setQr(String(p.qrV));
+        if (cacheKey) localStorage.setItem(cacheKey, String(p.qrV));
       }
-    }, 3000);
+
+      if (metaKey) {
+        localStorage.setItem(
+          metaKey,
+          JSON.stringify({
+            amount: p.amt,
+            fee: p.feeV,
+            total: p.totalV || (p.amt + p.feeV),
+            createdAt: p.created,
+            expiredAt: p.expired,
+          })
+        );
+      }
+
+      if (p.st === "completed") {
+        await confirmDeposit();
+      }
+    } catch {
+      // silent saat polling
+    }
   }
 
   async function downloadQR() {
     try {
-      if (!qrUrl) return toast.error("QR belum siap");
+      if (!qr) return toast.error("QR belum siap");
       const a = document.createElement("a");
-      a.href = qrUrl;
+      a.href = qr;
       a.download = `${order_id || "qris"}.png`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       toast.success("QRIS berhasil didownload ✅");
     } catch {
-      toast.error("Gagal download QR");
+      toast.error("Gagal download");
     }
   }
 
@@ -392,161 +490,200 @@ export default function PayClient() {
       return;
     }
 
-    if (!isLoggedIn) {
+    // ambil uid/token setelah mount (fix refresh)
+    const u = getActiveUserId();
+    const t = getToken();
+    setUid(u);
+    setToken(t);
+
+    // kalau belum login -> stop
+    if (!u || !t) {
       setLoading(false);
       setErr("Session user tidak ketemu. Login dulu ya.");
       return;
     }
 
-    let unmounted = false;
+    ensureLoaded();
 
-    (async () => {
-      const ok = await ensureQR();
+    stopPolling();
+    timerRef.current = setInterval(() => {
+      pollOnce();
+    }, 3000);
 
-      if (!ok || unmounted) {
-        if (!toastErrOnceRef.current && err) {
-          toastErrOnceRef.current = true;
-          toast.error(err, { id: "pay-load-fail" });
-        }
-        return;
-      }
-
-      startPolling();
-    })();
-
-    return () => {
-      unmounted = true;
-      stopPolling();
-    };
+    return () => stopPolling();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order_id]);
+
+  const isLoggedIn = Boolean(uid && token);
 
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)] px-4 py-8">
       <Toaster position="top-right" />
 
+      {/* hologram animation css */}
+      <style jsx global>{`
+        @keyframes yinnShimmer {
+          0% { transform: translateX(-40%) rotate(12deg); opacity: .0; }
+          20% { opacity: .55; }
+          60% { opacity: .55; }
+          100% { transform: translateX(40%) rotate(12deg); opacity: .0; }
+        }
+        .yinn-holo::before{
+          content:"";
+          position:absolute;
+          inset:-60px;
+          background:
+            linear-gradient(120deg,
+              rgba(255, 0, 255, .12),
+              rgba(0, 255, 255, .10),
+              rgba(255, 255, 0, .10),
+              rgba(255, 255, 255, .06)
+            );
+          mix-blend-mode: screen;
+          filter: blur(.2px);
+          opacity:.75;
+          pointer-events:none;
+        }
+        .yinn-holo::after{
+          content:"";
+          position:absolute;
+          inset:-80px;
+          background:
+            repeating-linear-gradient(45deg,
+              rgba(255,255,255,.20) 0px,
+              rgba(255,255,255,.20) 2px,
+              transparent 2px,
+              transparent 9px
+            );
+          opacity:.28;
+          transform: rotate(10deg);
+          pointer-events:none;
+        }
+        .yinn-shimmer{
+          position:absolute;
+          inset:-40%;
+          background: radial-gradient(closest-side, rgba(255,255,255,.35), transparent 70%);
+          animation: yinnShimmer 2.8s linear infinite;
+          pointer-events:none;
+        }
+      `}</style>
+
       <div className="mx-auto max-w-[520px]">
-        <div
-          className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-5"
-          style={{ boxShadow: "var(--yinn-soft)" }}
-        >
+        <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-5" style={{ boxShadow: "var(--yinn-soft)" }}>
           <div className="text-lg font-extrabold">Deposit via QRIS</div>
 
-          <div className="mt-2 text-sm text-[var(--yinn-muted)] break-words">
+          <div className="mt-2 text-sm text-[var(--yinn-muted)]">
             Order ID: <span className="font-semibold">{order_id}</span>
           </div>
 
           <div className="text-sm text-[var(--yinn-muted)]">
-            Nominal: <span className="font-semibold">Rp {Number(amount || 0).toLocaleString("id-ID")}</span>
+            Nominal: <span className="font-semibold">{formatIDR(amount)}</span>
           </div>
 
           <div className="text-sm text-[var(--yinn-muted)]">
-            Fee: <span className="font-semibold">Rp {Number(fee || 0).toLocaleString("id-ID")}</span>
+            Fee: <span className="font-semibold">{formatIDR(fee)}</span>
           </div>
 
           <div className="text-sm text-[var(--yinn-muted)]">
-            Total: <span className="font-semibold">Rp {Number(total || 0).toLocaleString("id-ID")}</span>
+            Total: <span className="font-semibold">{formatIDR(total || (amount + fee))}</span>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] p-4">
+          <div className="mt-2 grid grid-cols-2 gap-2 text-[12px] text-[var(--yinn-muted)]">
+            <div>
+              Dibuat: <span className="font-semibold">{createdAt ? fmtDate(createdAt) : "—"}</span>
+            </div>
+            <div className="text-right">
+              Expired: <span className="font-semibold">{expiredAt ? fmtDate(expiredAt) : "—"}</span>
+            </div>
+          </div>
+
+          <div className="mt-4">
             {err ? (
-              <>
-                <div className="text-sm font-extrabold">Gagal</div>
+              <div className="rounded-2xl border border-[var(--yinn-border)] p-4">
+                <div className="text-sm font-extrabold">{isLoggedIn ? "Gagal" : "Belum login"}</div>
                 <div className="mt-1 text-sm text-[var(--yinn-muted)]">{err}</div>
+
                 <div className="mt-3 flex gap-2">
-                  <Link
-                    href="/login"
-                    className="rounded-xl px-4 py-2 text-sm font-extrabold text-white"
-                    style={{ background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
-                  >
-                    Login
-                  </Link>
+                  {!isLoggedIn ? (
+                    <Link
+                      href="/login"
+                      className="rounded-xl px-4 py-2 text-sm font-extrabold text-white"
+                      style={{ background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
+                    >
+                      Login
+                    </Link>
+                  ) : null}
+
                   <button
-                    onClick={() => ensureQR()}
+                    onClick={() => {
+                      toastErrOnceRef.current = false;
+                      ensureLoaded();
+                    }}
                     className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-2 text-sm font-bold"
                   >
                     Coba lagi
                   </button>
-                </div>
-              </>
-            ) : loading ? (
-              <div className="text-sm font-bold text-[var(--yinn-muted)]">Menyiapkan pembayaran…</div>
-            ) : qrUrl ? (
-              <div className="grid place-items-center gap-3">
-                <div className="text-sm font-bold">Scan QR di bawah</div>
 
-                {/* QR Box + hologram vibe */}
+                  <Link
+                    href="/topup"
+                    className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-2 text-sm font-bold"
+                  >
+                    Balik
+                  </Link>
+                </div>
+              </div>
+            ) : loading ? (
+              <div className="rounded-2xl border border-[var(--yinn-border)] p-4 text-sm text-[var(--yinn-muted)]">
+                Menyiapkan pembayaran… jangan tutup halaman ini.
+              </div>
+            ) : (
+              <>
+                {/* QR + hologram ala BRImo */}
                 <div
-                  className="relative overflow-hidden rounded-2xl border border-[var(--yinn-border)] p-4"
+                  className="relative yinn-holo overflow-hidden rounded-2xl border border-[var(--yinn-border)] p-4"
                   style={{
                     background:
-                      "radial-gradient(1200px 400px at 10% 10%, rgba(99,102,241,.16), transparent 60%), radial-gradient(1200px 400px at 90% 30%, rgba(56,189,248,.14), transparent 55%), linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0))",
+                      "radial-gradient(900px 320px at 20% 15%, rgba(99,102,241,.18), transparent 60%), radial-gradient(900px 320px at 85% 25%, rgba(56,189,248,.14), transparent 55%), linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,0))",
                   }}
                 >
-                  <div
-                    className="pointer-events-none absolute inset-0 opacity-70"
-                    style={{
-                      background:
-                        "linear-gradient(115deg, rgba(255,0,255,.10), rgba(0,255,255,.08), rgba(255,255,0,.08)), radial-gradient(900px 200px at 20% 20%, rgba(255,255,255,.25), transparent 60%)",
-                      mixBlendMode: "screen",
-                      filter: "blur(0.2px)",
-                    }}
-                  />
-                  <div
-                    className="pointer-events-none absolute -inset-24 opacity-40"
-                    style={{
-                      background:
-                        "repeating-linear-gradient(45deg, rgba(255,255,255,.18) 0px, rgba(255,255,255,.18) 2px, transparent 2px, transparent 10px)",
-                      transform: "rotate(10deg)",
-                    }}
-                  />
-
+                  <div className="yinn-shimmer" />
                   <div className="relative grid place-items-center">
                     <div className="rounded-2xl bg-white p-4 shadow-[0_20px_60px_rgba(2,6,23,.18)]">
-                      <img src={qrUrl} alt="QRIS" className="block h-auto w-[260px] max-w-full" />
+                      <img src={qr} alt="QRIS" className="block h-auto w-[280px] max-w-full" style={{ imageRendering: "pixelated" }} />
                     </div>
                   </div>
                 </div>
 
-                <div className="text-xs text-[var(--yinn-muted)]">
-                  Status: <span className="font-semibold">{String(status || "pending").toUpperCase()}</span> • auto-check 3 detik
+                <div className="mt-3 text-xs text-[var(--yinn-muted)]">
+                  Status: <span className="font-bold">{String(status || "pending").toUpperCase()}</span> • auto-check 3 detik
                 </div>
 
-                <div className="grid w-full grid-cols-2 gap-2">
+                <div className="mt-3 grid grid-cols-2 gap-2">
                   <button
                     onClick={downloadQR}
-                    className="rounded-2xl py-3 text-sm font-extrabold text-white"
+                    className="rounded-xl px-4 py-3 text-sm font-extrabold text-white"
                     style={{ background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
                   >
                     Download QRIS
                   </button>
 
                   <button
-                    onClick={() => confirmIfCompleted()}
-                    className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] py-3 text-sm font-extrabold"
+                    onClick={() => confirmDeposit()}
+                    className="rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-3 text-sm font-extrabold"
                   >
                     Saya sudah membayar
                   </button>
                 </div>
 
-                <Link
-                  href="/topup"
-                  className="w-full rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] py-3 text-center text-sm font-bold"
-                >
-                  Balik ke Deposit
-                </Link>
-
-                {/* Debug kecil kalau perlu */}
-                {qrRaw ? (
-                  <div className="mt-2 w-full break-all text-[10px] text-[var(--yinn-muted)]">
-                    QR Raw: {qrRaw.slice(0, 80)}...
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="text-sm font-bold text-[var(--yinn-muted)]">
-                QR belum tersedia. Coba lagi.
-              </div>
+                <div className="mt-2">
+                  <Link
+                    href="/topup"
+                    className="block rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-4 py-3 text-center text-sm font-bold"
+                  >
+                    Balik ke Deposit
+                  </Link>
+                </div>
+              </>
             )}
           </div>
         </div>

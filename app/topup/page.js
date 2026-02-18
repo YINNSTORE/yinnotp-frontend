@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import toast, { Toaster } from "react-hot-toast";
@@ -18,8 +18,6 @@ import {
   ChevronRight,
 } from "lucide-react";
 
-const TTL = 12 * 60 * 60 * 1000;
-
 const formatIDR = (n) =>
   new Intl.NumberFormat("id-ID", {
     style: "currency",
@@ -31,75 +29,58 @@ const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
 function safeJson(text) {
   try {
-    if (!text) return null;
-    return JSON.parse(text);
+    return text ? JSON.parse(text) : {};
   } catch {
-    return null;
+    return {};
   }
 }
 
-function readLastSession() {
-  try {
-    const raw = localStorage.getItem("yinnotp:last_session");
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    const ts = Number(obj?.ts || 0);
-    if (!ts || Date.now() - ts > TTL) return null;
-    if (!obj?.token) return null;
-    return obj;
-  } catch {
-    return null;
-  }
+function normBackend(url) {
+  const u = String(url || "").trim();
+  if (!u) return "";
+  return u.endsWith("/") ? u.slice(0, -1) : u;
 }
 
 function getActiveUserId() {
-  try {
-    return (
-      localStorage.getItem("yinnotp_user_id") ||
-      localStorage.getItem("yinnotp_active_user") ||
-      localStorage.getItem("user_id") ||
-      localStorage.getItem("username") ||
-      readLastSession()?.username ||
-      ""
-    );
-  } catch {
-    return "";
-  }
+  return (
+    localStorage.getItem("yinnotp_active_user") ||
+    localStorage.getItem("yinnotp_user_id") ||
+    localStorage.getItem("yinnotp_username") ||
+    localStorage.getItem("username") ||
+    ""
+  );
 }
 
-function getToken() {
-  try {
-    const s = readLastSession();
-    if (s?.token) return String(s.token);
-    return String(localStorage.getItem("yinnotp_token") || "");
-  } catch {
-    return "";
-  }
+function getTokenForUser(uid) {
+  const last = safeJson(localStorage.getItem("yinnotp:last_session"));
+  return (
+    localStorage.getItem("yinnotp_token") ||
+    localStorage.getItem("yinnotp_token_active") ||
+    (uid ? localStorage.getItem(`yinnotp_token:${uid}`) : "") ||
+    last?.token ||
+    ""
+  );
 }
 
-function authHeaders(uid) {
-  const token = getToken();
-  const h = { "x-user-id": uid };
-  if (token) {
-    h["Authorization"] = `Bearer ${token}`;
-    h["x-token"] = token;
-    h["x-auth-token"] = token;
-  }
+function authHeaders(uid, token) {
+  const h = {};
+  if (!token) return h;
+  h["Authorization"] = `Bearer ${token}`;
+  h["X-Token"] = token;
+  h["X-User-Id"] = uid;
   return h;
 }
 
-function shortOrderId(s) {
-  const x = String(s || "");
-  if (x.length <= 18) return x;
-  return `${x.slice(0, 10)}…${x.slice(-6)}`;
-}
-
-function formatTime(ts) {
-  try {
-    return new Date(ts).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
-  } catch {
-    return "—";
-  }
+function formatDateTime(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  return d.toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function Stepper({ step }) {
@@ -152,11 +133,7 @@ function Modal({ open, onClose, children }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[80]">
-      <div
-        className="absolute inset-0"
-        style={{ background: "rgba(2,6,23,.55)" }}
-        onClick={onClose}
-      />
+      <div className="absolute inset-0" style={{ background: "rgba(2,6,23,.55)" }} onClick={onClose} />
       <div className="absolute inset-x-0 top-14 mx-auto max-w-[520px] px-4">
         <div
           className="rounded-2xl border p-4"
@@ -175,10 +152,12 @@ function Modal({ open, onClose, children }) {
 
 export default function TopupPage() {
   const router = useRouter();
+  const backend = normBackend(process.env.NEXT_PUBLIC_BACKEND_URL);
 
   const [user, setUser] = useState({ name: "User", balance: 0 });
   const [history, setHistory] = useState([]);
-  const [updatedAt, setUpdatedAt] = useState(0);
+  const [lastSync, setLastSync] = useState(0);
+  const [syncing, setSyncing] = useState(false);
 
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(1);
@@ -186,9 +165,6 @@ export default function TopupPage() {
   const [amount, setAmount] = useState(2000);
   const [method, setMethod] = useState("qris");
   const [loadingGo, setLoadingGo] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-
-  const warnedNoSessionRef = useRef(false);
 
   const presets = useMemo(() => [2000, 20000, 50000, 70000, 100000, 200000], []);
 
@@ -220,56 +196,88 @@ export default function TopupPage() {
     []
   );
 
-  async function syncDeposit(silent = false) {
-    if (syncing) return;
-    if (typeof window === "undefined") return;
+  function pendingKey(uid) {
+    return `yinnotp_pending_deposits:${uid}`;
+  }
+  function historyKey(uid) {
+    return `yinnotp_deposit_history:${uid}`;
+  }
+  function balanceKey(uid) {
+    return `yinnotp_balance:${uid}`;
+  }
+  function lastSyncKey(uid) {
+    return `yinnotp_deposit_last_sync:${uid}`;
+  }
 
-    const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
+  function loadLocal(uid) {
+    const bal = Number(String(localStorage.getItem(balanceKey(uid)) || "0").replace(/[^\d]/g, "")) || 0;
+    const hist = safeJson(localStorage.getItem(historyKey(uid)));
+    const pending = safeJson(localStorage.getItem(pendingKey(uid)));
+    const last = Number(localStorage.getItem(lastSyncKey(uid)) || "0") || 0;
+
+    const histArr = Array.isArray(hist) ? hist : [];
+    const pendingArr = Array.isArray(pending) ? pending : [];
+
+    // merge pending yang belum ada di history server
+    const existingIds = new Set(histArr.map((x) => String(x?.order_id || x?.id || "")));
+    const merged = [...pendingArr.filter((p) => !existingIds.has(String(p?.order_id || ""))), ...histArr];
+
+    setUser((u) => ({ ...u, balance: bal }));
+    setHistory(merged);
+    setLastSync(last);
+  }
+
+  async function syncDeposit(showToast = true) {
     const uid = getActiveUserId();
-    const token = getToken();
+    const token = getTokenForUser(uid);
 
-    if (!backend || !uid || !token) {
-      if (!silent && !warnedNoSessionRef.current) {
-        warnedNoSessionRef.current = true;
-        toast.error("Session login tidak ketemu. Login dulu ya.", { id: "no-session" });
-      }
+    if (!backend) {
+      if (showToast) toast.error("Backend URL belum diset");
+      return;
+    }
+    if (!uid || !token) {
+      if (showToast) toast.error("Session user tidak ketemu. Login dulu.");
       return;
     }
 
     setSyncing(true);
     try {
+      const headers = authHeaders(uid, token);
       const r = await fetch(`${backend}/deposit/me?user_id=${encodeURIComponent(uid)}`, {
         cache: "no-store",
-        headers: authHeaders(uid),
+        headers,
       });
       const t = await r.text();
       const j = safeJson(t);
 
       if (!r.ok || !j?.ok) {
-        const msg = String(j?.message || "Gagal sync deposit");
-        if (!silent) toast.error(msg, { id: "sync-fail" });
+        if (showToast) toast.error(j?.message || `Gagal sync (HTTP ${r.status})`);
         return;
       }
 
-      const bal = Number(j.balance || 0) || 0;
-      const hist = Array.isArray(j.history) ? j.history : [];
+      // simpan server history
+      localStorage.setItem(balanceKey(uid), String(j.balance || 0));
+      localStorage.setItem(historyKey(uid), JSON.stringify(j.history || []));
+      localStorage.setItem(lastSyncKey(uid), String(Date.now()));
 
-      // simpen PER-USER biar akun gak ketuker
-      localStorage.setItem(`yinnotp_balance:${uid}`, String(bal));
-      localStorage.setItem(`yinnotp_deposit_history:${uid}`, JSON.stringify(hist));
-      localStorage.setItem(`yinnotp_last_sync:${uid}`, String(Date.now()));
+      // legacy (kalau masih dipakai tempat lain)
+      localStorage.setItem("yinnotp_balance", String(j.balance || 0));
+      localStorage.setItem("yinnotp_deposit_history", JSON.stringify(j.history || []));
 
-      // legacy (biar dashboard yang lama masih kebaca)
-      localStorage.setItem("yinnotp_balance", String(bal));
-      localStorage.setItem("yinnotp_deposit_history", JSON.stringify(hist));
+      // bersihin pending yang udah completed di server
+      try {
+        const pending = safeJson(localStorage.getItem(pendingKey(uid)));
+        const pendingArr = Array.isArray(pending) ? pending : [];
+        const serverIds = new Set((j.history || []).map((x) => String(x?.order_id || x?.id || "")));
+        const nextPending = pendingArr.filter((p) => !serverIds.has(String(p?.order_id || "")));
+        localStorage.setItem(pendingKey(uid), JSON.stringify(nextPending));
+      } catch {}
 
-      setUser((prev) => ({ ...prev, balance: bal }));
-      setHistory(hist);
-      setUpdatedAt(Date.now());
+      loadLocal(uid);
 
-      if (!silent) toast.success("Sync deposit berhasil ✅", { id: "sync-ok" });
+      if (showToast) toast.success("Sync berhasil ✅");
     } catch {
-      if (!silent) toast.error("Koneksi / server error saat sync", { id: "sync-net" });
+      if (showToast) toast.error("Koneksi / server error saat sync");
     } finally {
       setSyncing(false);
     }
@@ -278,51 +286,28 @@ export default function TopupPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const uid = getActiveUserId();
-
     const storedName =
       localStorage.getItem("yinnotp_name") ||
+      localStorage.getItem("yinnotp_username") ||
       localStorage.getItem("username") ||
-      localStorage.getItem("name") ||
       "User";
 
-    const balRaw =
-      (uid && localStorage.getItem(`yinnotp_balance:${uid}`)) ||
-      localStorage.getItem("yinnotp_balance") ||
-      "0";
+    setUser((u) => ({ ...u, name: storedName }));
 
-    const storedBal = Number(String(balRaw).replace(/[^\d]/g, "")) || 0;
+    const uid = getActiveUserId();
+    if (uid) loadLocal(uid);
 
-    let hist = [];
-    try {
-      const raw =
-        (uid && localStorage.getItem(`yinnotp_deposit_history:${uid}`)) ||
-        localStorage.getItem("yinnotp_deposit_history") ||
-        "[]";
-      hist = JSON.parse(raw);
-      if (!Array.isArray(hist)) hist = [];
-    } catch {
-      hist = [];
-    }
-
-    const lastSync =
-      Number((uid && localStorage.getItem(`yinnotp_last_sync:${uid}`)) || 0) || 0;
-
-    setUser({ name: storedName, balance: storedBal });
-    setHistory(hist);
-    setUpdatedAt(lastSync);
-
-    // auto sync sekali pas masuk (silent biar gak spam toast)
-    syncDeposit(true);
+    // sync silent pas buka halaman
+    syncDeposit(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const openDeposit = () => {
-    // biar popup gak “delay”, buka dulu baru set step
+    // biar popup gak delay
     setOpen(true);
-    setStep(1);
     setAmount(2000);
     setMethod("qris");
+    setStep(1);
   };
 
   const goNext = () => setStep((s) => clamp(s + 1, 1, 3));
@@ -333,21 +318,36 @@ export default function TopupPage() {
     return `YINN-${Date.now()}-${r}`;
   };
 
-  const onConfirm = async () => {
-    const a = clamp(Number(amount) || 0, 2000, 1000000);
+  function addPendingLocal(uid, item) {
+    try {
+      const arr = safeJson(localStorage.getItem(pendingKey(uid)));
+      const list = Array.isArray(arr) ? arr : [];
+      localStorage.setItem(pendingKey(uid), JSON.stringify([item, ...list]));
+    } catch {}
+  }
 
-    // validasi session sebelum masuk pay page
+  const onConfirm = async () => {
     const uid = getActiveUserId();
-    const token = getToken();
-    if (!uid || !token) {
-      toast.error("Session login tidak ketemu. Login dulu ya.");
-      router.push("/login");
-      return;
-    }
+    const a = clamp(Number(amount) || 0, 2000, 1000000);
 
     setLoadingGo(true);
     try {
       const order_id = createOrderId();
+
+      // simpan pending lokal dulu (biar “menunggu” pasti tampil)
+      if (uid) {
+        const pendingItem = {
+          order_id,
+          amount: a,
+          method,
+          status: "pending",
+          created_at: Date.now(),
+        };
+        addPendingLocal(uid, pendingItem);
+        // update state cepat
+        setHistory((h) => [pendingItem, ...(Array.isArray(h) ? h : [])]);
+      }
+
       setOpen(false);
       router.push(
         `/topup/pay?method=${encodeURIComponent(method)}&amount=${a}&order_id=${encodeURIComponent(order_id)}`
@@ -357,19 +357,31 @@ export default function TopupPage() {
     }
   };
 
-  const openFromHistory = (h) => {
-    if (!h?.order_id) return;
-    const st = String(h.status || "").toLowerCase();
-    if (st === "success" || st === "completed" || st === "paid") {
-      toast("Deposit ini sudah sukses ✅");
-      return;
+  function statusLabel(s) {
+    const v = String(s || "").toLowerCase();
+    if (v.includes("success") || v.includes("completed") || v.includes("paid")) return "Sukses";
+    if (v.includes("pending") || v.includes("wait")) return "Menunggu";
+    return v ? v : "—";
+  }
+
+  function isPending(s) {
+    const v = String(s || "").toLowerCase();
+    return v.includes("pending") || v.includes("wait");
+  }
+
+  function openHistoryItem(it) {
+    const oid = String(it?.order_id || it?.id || "");
+    const amt = Number(it?.amount || it?.price || 0) || 0;
+    const m = String(it?.method || it?.payment_method || "qris");
+    if (!oid || !amt) return;
+
+    // pending -> buka halaman QR
+    if (isPending(it?.status)) {
+      router.push(`/topup/pay?method=${encodeURIComponent(m)}&amount=${amt}&order_id=${encodeURIComponent(oid)}&resume=1`);
+    } else {
+      toast("Status: " + statusLabel(it?.status));
     }
-    router.push(
-      `/topup/pay?resume=1&method=${encodeURIComponent(h.method || "qris")}&amount=${encodeURIComponent(
-        h.amount || 0
-      )}&order_id=${encodeURIComponent(h.order_id)}`
-    );
-  };
+  }
 
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
@@ -390,9 +402,7 @@ export default function TopupPage() {
 
           <div className="min-w-0">
             <div className="truncate text-sm font-extrabold leading-tight">Deposit</div>
-            <div className="truncate text-[11px] text-[var(--yinn-muted)]">
-              Isi saldo untuk beli OTP
-            </div>
+            <div className="truncate text-[11px] text-[var(--yinn-muted)]">Isi saldo untuk beli OTP</div>
           </div>
 
           <div className="ms-auto flex items-center gap-2">
@@ -406,28 +416,20 @@ export default function TopupPage() {
         <section className="grid grid-cols-2 gap-3">
           <div
             className="rounded-2xl border p-4"
-            style={{
-              background: "var(--yinn-surface)",
-              borderColor: "var(--yinn-border)",
-              boxShadow: "var(--yinn-soft)",
-            }}
+            style={{ background: "var(--yinn-surface)", borderColor: "var(--yinn-border)", boxShadow: "var(--yinn-soft)" }}
           >
             <div className="flex items-start justify-between">
               <div>
-                <div className="text-[11px] font-bold tracking-wide text-[var(--yinn-muted)]">
-                  ACCOUNT
-                </div>
+                <div className="text-[11px] font-bold tracking-wide text-[var(--yinn-muted)]">ACCOUNT</div>
                 <div className="text-sm font-extrabold">Balance Summary</div>
               </div>
-
               <button
-                onClick={() => syncDeposit(false)}
-                disabled={syncing}
-                className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--yinn-border)] disabled:opacity-60"
+                onClick={() => syncDeposit(true)}
+                className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--yinn-border)]"
                 title="Refresh"
                 aria-label="Refresh"
               >
-                <RefreshCw size={16} />
+                <RefreshCw size={16} className={syncing ? "animate-spin" : ""} />
               </button>
             </div>
 
@@ -435,7 +437,7 @@ export default function TopupPage() {
               <div className="text-xs text-[var(--yinn-muted)]">Saldo akun kamu</div>
               <div className="mt-1 text-xl font-extrabold">{formatIDR(user.balance)}</div>
               <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
-                Updated: {updatedAt ? formatTime(updatedAt) : "Belum sync"}
+                Updated: {lastSync ? formatDateTime(lastSync) : "Belum sync"}
               </div>
             </div>
 
@@ -449,10 +451,7 @@ export default function TopupPage() {
               <button
                 onClick={openDeposit}
                 className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-extrabold text-white"
-                style={{
-                  background:
-                    "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
-                }}
+                style={{ background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
               >
                 <Plus size={16} /> Deposit
               </button>
@@ -461,20 +460,62 @@ export default function TopupPage() {
 
           <div
             className="rounded-2xl border p-4"
-            style={{
-              background: "var(--yinn-surface)",
-              borderColor: "var(--yinn-border)",
-              boxShadow: "var(--yinn-soft)",
-            }}
+            style={{ background: "var(--yinn-surface)", borderColor: "var(--yinn-border)", boxShadow: "var(--yinn-soft)" }}
           >
             <div className="flex items-start justify-between">
               <div className="text-sm font-extrabold">Riwayat pembayaran</div>
-              <div className="text-[11px] text-[var(--yinn-muted)]">
-                Updated: {updatedAt ? formatTime(updatedAt) : "Belum sync"}
-              </div>
+              <div className="text-[11px] text-[var(--yinn-muted)]">Updated: {lastSync ? formatDateTime(lastSync) : "—"}</div>
             </div>
 
-            {history.length === 0 ? (
+            {history.length ? (
+              <div className="mt-3 space-y-2">
+                {history.slice(0, 3).map((it) => {
+                  const oid = String(it?.order_id || it?.id || "");
+                  const amt = Number(it?.amount || it?.price || 0) || 0;
+                  const st = statusLabel(it?.status);
+                  const pend = isPending(it?.status);
+
+                  return (
+                    <button
+                      key={oid || Math.random()}
+                      onClick={() => openHistoryItem(it)}
+                      className="w-full rounded-2xl border border-[var(--yinn-border)] p-3 text-left"
+                      style={{ background: "var(--yinn-surface)" }}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-sm font-extrabold break-words">{oid || "—"}</div>
+                          <div className="mt-1 text-[12px] text-[var(--yinn-muted)]">
+                            {String(it?.method || it?.payment_method || "qris")}{" "}
+                            {it?.created_at ? `• ${formatDateTime(it.created_at)}` : ""}
+                            {pend ? " • klik untuk buka" : ""}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-extrabold">Rp {amt.toLocaleString("id-ID")}</div>
+                          <div
+                            className="mt-1 inline-flex rounded-full px-2 py-1 text-[11px] font-bold"
+                            style={{
+                              background: pend ? "rgba(245,158,11,.15)" : "rgba(34,197,94,.12)",
+                              color: pend ? "rgb(180,83,9)" : "rgb(22,163,74)",
+                            }}
+                          >
+                            {st}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+
+                <button
+                  onClick={() => syncDeposit(true)}
+                  className="mt-1 w-full rounded-xl border border-[var(--yinn-border)] py-2 text-sm font-bold text-[var(--yinn-muted)]"
+                >
+                  {syncing ? "Sync..." : "sync lagi ›"}
+                </button>
+              </div>
+            ) : (
               <div className="mt-4 grid place-items-center rounded-2xl border border-[var(--yinn-border)] p-4">
                 <div className="grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)]">
                   <Wallet size={18} />
@@ -487,62 +528,11 @@ export default function TopupPage() {
                   <Plus size={16} /> Deposit
                 </button>
               </div>
-            ) : (
-              <div className="mt-3 space-y-2">
-                {history.slice(0, 3).map((h, idx) => {
-                  const st = String(h.status || "").toLowerCase();
-                  const isPending =
-                    st === "pending" || st === "waiting" || st === "unpaid" || st === "process";
-
-                  return (
-                    <button
-                      key={h.order_id || idx}
-                      onClick={() => isPending && openFromHistory(h)}
-                      className="w-full rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3 text-left"
-                      style={{ boxShadow: "var(--yinn-soft)" }}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-[13px] font-extrabold break-all">
-                            {h.order_id ? shortOrderId(h.order_id) : "—"}
-                          </div>
-                          <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
-                            {String(h.method || "qris")} •{" "}
-                            {h.time ? String(h.time) : ""}
-                            {isPending ? " • klik untuk buka" : ""}
-                          </div>
-                        </div>
-
-                        <div className="text-right">
-                          <div className="text-sm font-extrabold">{formatIDR(Number(h.amount || 0))}</div>
-                          <div
-                            className="mt-1 inline-flex rounded-full px-2 py-[3px] text-[11px] font-extrabold"
-                            style={{
-                              background: isPending ? "rgba(245,158,11,.15)" : "rgba(34,197,94,.12)",
-                              color: isPending ? "#b45309" : "#16a34a",
-                            }}
-                          >
-                            {isPending ? "Menunggu" : "Sukses"}
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-
-                <button
-                  onClick={() => syncDeposit(false)}
-                  disabled={syncing}
-                  className="w-full rounded-xl border border-[var(--yinn-border)] py-2 text-sm font-bold text-[var(--yinn-muted)] disabled:opacity-60"
-                >
-                  {syncing ? "Sync..." : "sync lagi ›"}
-                </button>
-              </div>
             )}
           </div>
         </section>
 
-        {/* trending (simple) */}
+        {/* trending */}
         <section className="mt-5">
           <div className="flex items-center justify-between">
             <div className="text-sm font-extrabold">Sedang trending</div>
@@ -559,11 +549,7 @@ export default function TopupPage() {
               <div
                 key={it.name}
                 className="rounded-2xl border p-3"
-                style={{
-                  background: "var(--yinn-surface)",
-                  borderColor: "var(--yinn-border)",
-                  boxShadow: "var(--yinn-soft)",
-                }}
+                style={{ background: "var(--yinn-surface)", borderColor: "var(--yinn-border)", boxShadow: "var(--yinn-soft)" }}
               >
                 <div className="flex items-center gap-3">
                   <div className="grid h-11 w-11 place-items-center rounded-2xl border border-[var(--yinn-border)] overflow-hidden">
@@ -571,9 +557,7 @@ export default function TopupPage() {
                   </div>
                   <div className="min-w-0">
                     <div className="text-sm font-extrabold">{it.name}</div>
-                    <div className="text-xs text-[var(--yinn-muted)]">
-                      Harga terbaru {formatIDR(it.price)}
-                    </div>
+                    <div className="text-xs text-[var(--yinn-muted)]">Harga terbaru {formatIDR(it.price)}</div>
                   </div>
                 </div>
               </div>

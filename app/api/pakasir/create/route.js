@@ -1,55 +1,69 @@
+import { NextResponse } from "next/server";
+
+export const dynamic = "force-dynamic";
+
 export async function POST(req) {
   try {
-    const { method, order_id, amount } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const method = (body.method || "qris").toString();
+    const order_id = (body.order_id || "").toString().trim();
+    const amountRaw = body.amount ?? "";
+    const amount = Number(String(amountRaw).replace(/[^\d]/g, ""));
 
     const project = process.env.PAKASIR_PROJECT;
     const api_key = process.env.PAKASIR_API_KEY;
-    const base = process.env.PAKASIR_BASE_URL || "https://app.pakasir.com";
 
     if (!project || !api_key) {
-      return new Response(
-        JSON.stringify({ ok: false, message: "Missing PAKASIR_PROJECT / PAKASIR_API_KEY env" }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
+      return NextResponse.json(
+        { ok: false, error: "ENV PAKASIR_PROJECT / PAKASIR_API_KEY belum diset di server." },
+        { status: 500 }
       );
     }
-
-    if (!method || !order_id || !Number.isFinite(Number(amount))) {
-      return new Response(
-        JSON.stringify({ ok: false, message: "Invalid payload" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+    if (!order_id) {
+      return NextResponse.json({ ok: false, error: "order_id kosong." }, { status: 400 });
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return NextResponse.json({ ok: false, error: "amount tidak valid." }, { status: 400 });
     }
 
-    const url = `${base}/api/transactioncreate/${encodeURIComponent(method)}`;
-
+    const url = `https://app.pakasir.com/api/transactioncreate/${encodeURIComponent(method)}`;
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        project,
-        order_id,
-        amount: Number(amount),
-        api_key,
-      }),
+      // api_key tetap di server (AMAN)
+      body: JSON.stringify({ project, order_id, amount, api_key }),
+      cache: "no-store",
     });
 
-    const data = await res.json().catch(() => ({}));
+    const text = await res.text();
 
-    if (!res.ok) {
-      return new Response(JSON.stringify({ ok: false, status: res.status, data }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Pakasir balikin respon non-JSON / kosong.",
+          status: res.status,
+          body_preview: (text || "").slice(0, 300),
+        },
+        { status: 502 }
+      );
     }
 
-    return new Response(JSON.stringify({ ok: true, ...data }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    if (!res.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Pakasir error.", status: res.status, data },
+        { status: 502 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, data }, { status: 200 });
   } catch (e) {
-    return new Response(JSON.stringify({ ok: false, message: String(e) }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return NextResponse.json(
+      { ok: false, error: e?.message || String(e) },
+      { status: 500 }
+    );
   }
 }

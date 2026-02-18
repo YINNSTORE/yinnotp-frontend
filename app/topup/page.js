@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
 import ThemeMenu from "../components/ThemeMenu";
 import BottomNav from "../components/BottomNav";
 import {
@@ -123,6 +124,15 @@ function getUserId() {
   );
 }
 
+function safeJsonParse(text) {
+  if (!text) return null;
+  const t = String(text).trim();
+  if (!t) return null;
+  // kalau backend ngirim HTML (redirect/403), jangan parse
+  if (t.startsWith("<!DOCTYPE") || t.startsWith("<html") || t.startsWith("<")) return null;
+  return JSON.parse(t);
+}
+
 function readHistoryLS() {
   if (typeof window === "undefined") return [];
   try {
@@ -146,23 +156,23 @@ function upsertHistory(oldList, item) {
   const idx = list.findIndex((x) => x?.order_id && x.order_id === item.order_id);
   if (idx >= 0) list[idx] = { ...list[idx], ...item };
   else list.unshift(item);
-  return list.slice(0, 30); // keep 30 terakhir
+  return list.slice(0, 30);
 }
 
 export default function TopupPage() {
   const router = useRouter();
 
   const [user, setUser] = useState({ name: "User", balance: 0 });
-
   const [history, setHistory] = useState([]);
   const [updatedAt, setUpdatedAt] = useState(null);
+
   const [syncing, setSyncing] = useState(false);
 
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(1);
 
   const [amount, setAmount] = useState(2000);
-  const [method, setMethod] = useState("qris"); // default
+  const [method, setMethod] = useState("qris");
   const [loadingGo, setLoadingGo] = useState(false);
 
   const presets = useMemo(() => [2000, 20000, 50000, 70000, 100000, 200000], []);
@@ -195,41 +205,33 @@ export default function TopupPage() {
     []
   );
 
-  const syncDeposit = async () => {
+  const syncDeposit = async ({ silent = false } = {}) => {
     const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
     const user_id = getUserId();
-    if (!backend || !user_id) return;
+
+    if (!backend) {
+      if (!silent) toast.error("NEXT_PUBLIC_BACKEND_URL belum di-set");
+      return false;
+    }
+    if (!user_id) {
+      if (!silent) toast.error("User ID tidak ditemukan (login dulu)");
+      return false;
+    }
+
+    const loadingId = silent ? null : toast.loading("Sync saldo & riwayat...");
 
     setSyncing(true);
     try {
       const url = `${backend.replace(/\/+$/, "")}/deposit/me?user_id=${encodeURIComponent(user_id)}`;
       const res = await fetch(url, { cache: "no-store" });
 
-      if (!res.ok) return;
+      const txt = await res.text();
+      const j = safeJsonParse(txt);
 
-      // amanin parse json (biar gak "Unexpected end of JSON input")
-      const ct = res.headers.get("content-type") || "";
-      if (!ct.includes("application/json")) {
-        const txt = await res.text();
-        if (!txt || txt.trim().startsWith("<")) return; // html/empty
-        // coba parse kalau ternyata json tanpa header
-        const j2 = JSON.parse(txt);
-        if (!j2?.ok) return;
-
-        const bal = Number(j2.balance || 0);
-        const his = Array.isArray(j2.history) ? j2.history : [];
-
-        setUser((u) => ({ ...u, balance: bal }));
-        setHistory(his);
-        setUpdatedAt(Date.now());
-
-        localStorage.setItem("yinnotp_balance", String(bal));
-        writeHistoryLS(his);
-        return;
+      if (!res.ok || !j?.ok) {
+        if (!silent) toast.error("Gagal sync (backend tidak mengirim JSON valid)");
+        return false;
       }
-
-      const j = await res.json();
-      if (!j?.ok) return;
 
       const bal = Number(j.balance || 0);
       const his = Array.isArray(j.history) ? j.history : [];
@@ -240,17 +242,22 @@ export default function TopupPage() {
 
       localStorage.setItem("yinnotp_balance", String(bal));
       writeHistoryLS(his);
+
+      if (!silent) toast.success("Sync berhasil ✅");
+      return true;
     } catch {
-      // diem aja biar UX aman
+      if (!silent) toast.error("Sync error (cek backend)");
+      return false;
     } finally {
       setSyncing(false);
+      if (loadingId) toast.dismiss(loadingId);
     }
   };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // 1) load cepat dari localStorage (biar UI langsung keisi)
+    // load cepat dari localStorage
     const storedName =
       localStorage.getItem("yinnotp_name") ||
       localStorage.getItem("username") ||
@@ -263,14 +270,12 @@ export default function TopupPage() {
       "0";
 
     const storedBal = Number(String(storedBalRaw).replace(/[^\d]/g, "")) || 0;
-
     setUser({ name: storedName, balance: storedBal });
 
-    const lsHistory = readHistoryLS();
-    setHistory(lsHistory);
+    setHistory(readHistoryLS());
 
-    // 2) sync ke backend
-    syncDeposit();
+    // sync awal (silent)
+    syncDeposit({ silent: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -295,7 +300,7 @@ export default function TopupPage() {
     try {
       const order_id = createOrderId();
 
-      // ✅ simpan dulu sebagai "pending" biar riwayat gak kosong
+      // simpan pending biar riwayat nongol & bisa dibuka lagi
       const pending = {
         order_id,
         amount: a,
@@ -313,11 +318,25 @@ export default function TopupPage() {
       setOpen(false);
 
       router.push(
-        `/topup/pay?method=${encodeURIComponent(method)}&amount=${a}&order_id=${encodeURIComponent(order_id)}`
+        `/topup/pay?resume=1&method=${encodeURIComponent(method)}&amount=${a}&order_id=${encodeURIComponent(order_id)}`
       );
     } finally {
       setLoadingGo(false);
     }
+  };
+
+  const openPendingToPay = (h) => {
+    const status = String(h?.status || "").toLowerCase();
+    const isPending = !status || status === "pending" || status === "process" || status === "processing" || status === "unpaid";
+
+    if (!isPending) return;
+
+    const m = h?.payment_method || h?.method || "qris";
+    const a = Number(h?.amount || 0);
+    const oid = h?.order_id || "";
+    if (!oid || !a) return;
+
+    router.push(`/topup/pay?resume=1&method=${encodeURIComponent(m)}&amount=${a}&order_id=${encodeURIComponent(oid)}`);
   };
 
   const historyPreview = (Array.isArray(history) ? history : []).slice(0, 4);
@@ -353,21 +372,15 @@ export default function TopupPage() {
         <section className="grid grid-cols-2 gap-3">
           <div
             className="rounded-2xl border p-4"
-            style={{
-              background: "var(--yinn-surface)",
-              borderColor: "var(--yinn-border)",
-              boxShadow: "var(--yinn-soft)",
-            }}
+            style={{ background: "var(--yinn-surface)", borderColor: "var(--yinn-border)", boxShadow: "var(--yinn-soft)" }}
           >
             <div className="flex items-start justify-between">
               <div>
-                <div className="text-[11px] font-bold tracking-wide text-[var(--yinn-muted)]">
-                  ACCOUNT
-                </div>
+                <div className="text-[11px] font-bold tracking-wide text-[var(--yinn-muted)]">ACCOUNT</div>
                 <div className="text-sm font-extrabold">Balance Summary</div>
               </div>
               <button
-                onClick={syncDeposit}
+                onClick={() => syncDeposit({ silent: false })}
                 disabled={syncing}
                 className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--yinn-border)] disabled:opacity-60"
                 title="Refresh"
@@ -380,9 +393,7 @@ export default function TopupPage() {
             <div className="mt-3">
               <div className="text-xs text-[var(--yinn-muted)]">Saldo akun kamu</div>
               <div className="mt-1 text-xl font-extrabold">{formatIDR(user.balance)}</div>
-              <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
-                Updated: {updatedAt ? formatTime(updatedAt) : "—"}
-              </div>
+              <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">Updated: {updatedAt ? formatTime(updatedAt) : "—"}</div>
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2">
@@ -395,9 +406,7 @@ export default function TopupPage() {
               <button
                 onClick={openDeposit}
                 className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-extrabold text-white"
-                style={{
-                  background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
-                }}
+                style={{ background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
               >
                 <Plus size={16} /> Deposit
               </button>
@@ -406,17 +415,11 @@ export default function TopupPage() {
 
           <div
             className="rounded-2xl border p-4"
-            style={{
-              background: "var(--yinn-surface)",
-              borderColor: "var(--yinn-border)",
-              boxShadow: "var(--yinn-soft)",
-            }}
+            style={{ background: "var(--yinn-surface)", borderColor: "var(--yinn-border)", boxShadow: "var(--yinn-soft)" }}
           >
             <div className="flex items-start justify-between">
               <div className="text-sm font-extrabold">Riwayat pembayaran</div>
-              <div className="text-[11px] text-[var(--yinn-muted)]">
-                Updated: {updatedAt ? formatTime(updatedAt) : "—"}
-              </div>
+              <div className="text-[11px] text-[var(--yinn-muted)]">Updated: {updatedAt ? formatTime(updatedAt) : "—"}</div>
             </div>
 
             {historyPreview.length === 0 ? (
@@ -435,33 +438,31 @@ export default function TopupPage() {
             ) : (
               <div className="mt-3 grid gap-2">
                 {historyPreview.map((h) => {
-                  const status = (h?.status || "").toLowerCase();
+                  const status = String(h?.status || "").toLowerCase();
+                  const isPending = !status || status === "pending" || status === "process" || status === "processing" || status === "unpaid";
+
                   const statusLabel =
-                    status === "completed"
-                      ? "Sukses"
-                      : status === "failed"
-                      ? "Gagal"
-                      : "Menunggu";
+                    status === "completed" ? "Sukses" : status === "failed" ? "Gagal" : "Menunggu";
 
                   return (
-                    <div
+                    <button
                       key={h.order_id || Math.random()}
-                      className="rounded-2xl border border-[var(--yinn-border)] p-3"
+                      onClick={() => openPendingToPay(h)}
+                      disabled={!isPending}
+                      className="text-left rounded-2xl border border-[var(--yinn-border)] p-3 disabled:opacity-70"
+                      style={{ cursor: isPending ? "pointer" : "default" }}
+                      title={isPending ? "Buka pembayaran" : "Sudah selesai"}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="text-xs font-extrabold line-clamp-1">
-                            {h.order_id || "—"}
-                          </div>
+                          <div className="text-xs font-extrabold line-clamp-1">{h.order_id || "—"}</div>
                           <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
-                            {h.payment_method || "—"} •{" "}
-                            {formatTime(h.completed_at || h.created_at)}
+                            {(h.payment_method || "—")} • {formatTime(h.completed_at || h.created_at)}
+                            {isPending ? " • klik untuk buka" : ""}
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-xs font-extrabold">
-                            {formatIDR(Number(h.amount || 0))}
-                          </div>
+                          <div className="text-xs font-extrabold">{formatIDR(Number(h.amount || 0))}</div>
                           <div
                             className="mt-1 inline-flex rounded-full px-2 py-[2px] text-[11px] font-bold"
                             style={{
@@ -483,24 +484,22 @@ export default function TopupPage() {
                           </div>
                         </div>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
 
-                <div className="flex justify-end">
-                  <button
-                    onClick={syncDeposit}
-                    className="text-sm font-semibold text-[var(--yinn-muted)]"
-                  >
-                    sync lagi <ChevronRight className="inline" size={16} />
-                  </button>
-                </div>
+                <button
+                  onClick={() => syncDeposit({ silent: false })}
+                  className="text-sm font-semibold text-[var(--yinn-muted)] text-right"
+                >
+                  sync lagi <ChevronRight className="inline" size={16} />
+                </button>
               </div>
             )}
           </div>
         </section>
 
-        {/* trending (simple) */}
+        {/* trending */}
         <section className="mt-5">
           <div className="flex items-center justify-between">
             <div className="text-sm font-extrabold">Sedang trending</div>
@@ -517,11 +516,7 @@ export default function TopupPage() {
               <div
                 key={it.name}
                 className="rounded-2xl border p-3"
-                style={{
-                  background: "var(--yinn-surface)",
-                  borderColor: "var(--yinn-border)",
-                  boxShadow: "var(--yinn-soft)",
-                }}
+                style={{ background: "var(--yinn-surface)", borderColor: "var(--yinn-border)", boxShadow: "var(--yinn-soft)" }}
               >
                 <div className="flex items-center gap-3">
                   <div className="grid h-11 w-11 place-items-center rounded-2xl border border-[var(--yinn-border)] overflow-hidden">
@@ -649,10 +644,7 @@ export default function TopupPage() {
             ))}
 
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <button
-                onClick={goBack}
-                className="rounded-2xl border border-[var(--yinn-border)] py-3 text-sm font-extrabold"
-              >
+              <button onClick={goBack} className="rounded-2xl border border-[var(--yinn-border)] py-3 text-sm font-extrabold">
                 ← Kembali
               </button>
               <button
@@ -687,10 +679,7 @@ export default function TopupPage() {
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <button
-                onClick={goBack}
-                className="rounded-2xl border border-[var(--yinn-border)] py-3 text-sm font-extrabold"
-              >
+              <button onClick={goBack} className="rounded-2xl border border-[var(--yinn-border)] py-3 text-sm font-extrabold">
                 ← Kembali
               </button>
               <button

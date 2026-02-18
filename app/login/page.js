@@ -2,7 +2,7 @@
 
 import "./login.css";
 import { useEffect, useState } from "react";
-import toast from "react-hot-toast";
+import toast, { Toaster } from "react-hot-toast";
 import { signIn, getCsrfToken } from "next-auth/react";
 
 const TTL = 12 * 60 * 60 * 1000;
@@ -10,7 +10,8 @@ const DASHBOARD_URL = "/dashboard";
 
 function safeJson(text) {
   try {
-    return text ? JSON.parse(text) : {};
+    if (!text) return {};
+    return JSON.parse(text);
   } catch {
     return {};
   }
@@ -26,34 +27,48 @@ function readLastSession() {
       localStorage.removeItem("yinnotp:last_session");
       return null;
     }
-    if (!obj?.token || !obj?.username) return null;
-    return { username: obj.username, email: obj.email || "", token: obj.token, ts };
+    if (!obj?.token || !obj?.username || !obj?.email) return null;
+    return { username: obj.username, email: obj.email, token: obj.token, ts };
   } catch {
-    try { localStorage.removeItem("yinnotp:last_session"); } catch {}
+    try {
+      localStorage.removeItem("yinnotp:last_session");
+    } catch {}
     return null;
   }
 }
 
+/**
+ * Simpan identitas user AKTIF + token backend (dipakai deposit/pay/sync)
+ * + bersihin cache user lain biar saldo/riwayat gak ketuker
+ */
 function setActiveUser(username, email, token, fallbackIdent = "") {
   const u = String(username || fallbackIdent || "").trim();
   if (!u) return;
 
+  // active identity
   localStorage.setItem("yinnotp_active_user", u);
   localStorage.setItem("yinnotp_user_id", u);
   localStorage.setItem("yinnotp_username", u);
   localStorage.setItem("yinnotp_name", u);
   if (email) localStorage.setItem("yinnotp_email", String(email));
 
-  // token backend (WAJIB buat topup/pay)
-  if (token) localStorage.setItem("yinnotp_token", String(token));
+  // IMPORTANT: token backend (dipakai halaman deposit/pay)
+  if (token) {
+    localStorage.setItem("yinnotp_token", String(token));
+    localStorage.setItem("yinnotp_token_active", String(token));
+    localStorage.setItem(`yinnotp_token:${u}`, String(token));
+  }
 
-  // bersihin cache global + cache per-user biar akun beda gak ketuker
+  // clear cache GLOBAL (legacy)
   localStorage.removeItem("yinnotp_balance");
   localStorage.removeItem("yinnotp_deposit_history");
+
+  // clear cache PER-USER
   try {
     localStorage.removeItem(`yinnotp_balance:${u}`);
     localStorage.removeItem(`yinnotp_deposit_history:${u}`);
-    localStorage.removeItem(`yinnotp_last_sync:${u}`);
+    localStorage.removeItem(`yinnotp_deposit_last_sync:${u}`);
+    localStorage.removeItem(`yinnotp_pending_deposits:${u}`);
   } catch {}
 }
 
@@ -67,29 +82,26 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true);
 
   useEffect(() => {
-    // prewarm next-auth biar tombol social responsif
-    try { getCsrfToken().catch(() => {}); } catch {}
-    try { fetch("/api/auth/providers", { cache: "no-store" }).catch(() => {}); } catch {}
+    // prewarm next-auth biar klik sosial cepet
+    try {
+      getCsrfToken().catch(() => {});
+    } catch {}
+    try {
+      fetch("/api/auth/providers", { cache: "no-store" }).catch(() => {});
+    } catch {}
 
+    // load saved session
     setLast(readLastSession());
+
+    (async () => {
+      try {
+        await getCsrfToken();
+      } catch {}
+      try {
+        await fetch("/api/auth/providers", { cache: "no-store" });
+      } catch {}
+    })();
   }, []);
-
-  function explainLoginError(status, j) {
-    const msg = String(j?.message || "").toLowerCase();
-
-    if (status === 404) return "Endpoint login belum ada. Pastikan `app/api/auth/login/route.js` sudah ditambah & deploy.";
-    if (status === 401 || status === 403) return "Username/email atau password salah.";
-    if (status === 429) return "Terlalu banyak percobaan. Coba lagi sebentar.";
-    if (status >= 500) return "Server backend error. Coba lagi nanti.";
-
-    // fallback dari message backend
-    if (msg.includes("password")) return "Password salah.";
-    if (msg.includes("username") || msg.includes("email")) return "Username/email tidak ditemukan.";
-    if (msg.includes("verify")) return "Akun belum terverifikasi.";
-    if (j?.message) return j.message;
-
-    return "Login gagal.";
-  }
 
   async function submitLogin(e) {
     e.preventDefault();
@@ -111,7 +123,8 @@ export default function LoginPage() {
       const j = safeJson(t);
 
       if (!r.ok || !j.ok) {
-        toast.error(explainLoginError(r.status, j));
+        // biar spesifik: pakai message dari backend
+        toast.error(j.message || "Login gagal (server error)");
         return;
       }
 
@@ -120,13 +133,13 @@ export default function LoginPage() {
       const token = String(j.data?.token || "").trim();
 
       if (!token) {
-        toast.error("Login berhasil tapi token kosong. Backend login.php wajib return `data.token`.");
+        toast.error("Login gagal: token kosong dari server");
         return;
       }
 
       setActiveUser(username, email, token, id);
 
-      if (remember) {
+      if (remember && token && username && email) {
         localStorage.setItem(
           "yinnotp:last_session",
           JSON.stringify({ username, email, token, ts: Date.now() })
@@ -137,7 +150,7 @@ export default function LoginPage() {
       toast.success("Login berhasil");
       window.location.replace(DASHBOARD_URL);
     } catch {
-      toast.error("Koneksi putus / server error");
+      toast.error("Server error / koneksi putus");
     } finally {
       setLoading(false);
     }
@@ -146,7 +159,7 @@ export default function LoginPage() {
   async function clickSaved() {
     const cur = readLastSession();
     if (!cur) {
-      toast.error("Belum ada sesi tersimpan, silakan login");
+      toast.error("Belum ada sesi login, silakan sign in");
       setLast(null);
       return;
     }
@@ -169,11 +182,13 @@ export default function LoginPage() {
         return;
       }
 
+      // set active user + token
       setActiveUser(cur.username, cur.email, cur.token, cur.username);
+
       toast.success("Auto login berhasil");
       window.location.replace(DASHBOARD_URL);
     } catch {
-      toast.error("Koneksi putus / server error");
+      toast.error("Server error / koneksi putus");
     } finally {
       setLoading(false);
     }
@@ -181,6 +196,8 @@ export default function LoginPage() {
 
   return (
     <div className="login-wrap">
+      <Toaster position="top-right" />
+
       <div className="dots-decoration dots-top-right"></div>
       <div className="dots-decoration dots-bottom-left"></div>
 
@@ -204,13 +221,13 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {last?.username ? (
+        {last?.username && last?.email ? (
           <div className="saved-account" onClick={clickSaved} role="button" title="Klik untuk auto login">
             <div className="account-info">
               <div className="avatar">{String(last.username).slice(0, 1).toUpperCase()}</div>
               <div className="account-details">
                 <p>Masuk sebagai {last.username}</p>
-                <span>{last.email || "-"}</span>
+                <span>{last.email}</span>
               </div>
             </div>
             <span style={{ fontSize: 22, fontWeight: 900, color: "var(--navy-dark)" }}>☄</span>
@@ -257,7 +274,14 @@ export default function LoginPage() {
               <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
               Remember Me
             </label>
-            <a href="#" className="forgot-pass" onClick={(e) => { e.preventDefault(); toast("Coming soon"); }}>
+            <a
+              href="#"
+              className="forgot-pass"
+              onClick={(e) => {
+                e.preventDefault();
+                toast("Coming soon");
+              }}
+            >
               Forgot Password?
             </a>
           </div>

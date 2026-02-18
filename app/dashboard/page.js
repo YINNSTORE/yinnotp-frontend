@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import ThemeMenu from "../components/ThemeMenu";
 import BottomNav from "../components/BottomNav";
 import {
@@ -23,7 +22,9 @@ const formatIDR = (n) =>
     maximumFractionDigits: 0,
   }).format(Number.isFinite(n) ? n : 0);
 
-function AppLogo({ src, alt }) {
+function AppLogo({ src, alt, fallback = "✨" }) {
+  const [err, setErr] = useState(false);
+
   return (
     <div
       className="relative grid h-14 w-14 place-items-center rounded-2xl border border-[var(--yinn-border)] overflow-hidden"
@@ -32,8 +33,17 @@ function AppLogo({ src, alt }) {
           "linear-gradient(135deg, rgba(99,102,241,.10), rgba(168,85,247,.10))",
       }}
     >
-      {/* kalau file belum ada, gambar akan 404 tapi build aman */}
-      <Image src={src} alt={alt} width={36} height={36} />
+      {src && !err ? (
+        <img
+          src={src}
+          alt={alt}
+          className="h-9 w-9 object-contain"
+          loading="lazy"
+          onError={() => setErr(true)}
+        />
+      ) : (
+        <span className="text-2xl">{fallback}</span>
+      )}
     </div>
   );
 }
@@ -75,21 +85,57 @@ export default function DashboardPage() {
     []
   );
 
-  // ✅ pakai icon asli (path di public/apps/)
+  // ✅ icon pakai link yang lu kasih
   const apps = useMemo(
     () => [
-      { name: "WhatsApp", tag: "WhatsApp", icon: "/apps/whatsapp.png" },
-      { name: "Telegram", tag: "Telegram", icon: "/apps/telegram.png" },
-      { name: "TikTok", tag: "TikTok", icon: "/apps/tiktok.png" },
-      { name: "Instagram", tag: "Lainnya", icon: "/apps/instagram.png" },
-      { name: "Facebook", tag: "Lainnya", icon: "/apps/facebook.png" },
-      { name: "Gmail", tag: "Google", icon: "/apps/gmail.png" },
-      { name: "Google", tag: "Google", icon: "/apps/google.png" },
-      { name: "Shopee", tag: "Lainnya", icon: "/apps/shopee.png" },
-      { name: "Tokopedia", tag: "Lainnya", icon: "/apps/tokopedia.png" },
-      { name: "Discord", tag: "Lainnya", icon: "/apps/discord.png" },
-      { name: "X (Twitter)", tag: "Lainnya", icon: "/apps/x.png" },
-      { name: "WeChat", tag: "Lainnya", icon: "/apps/wechat.png" },
+      {
+        name: "WhatsApp",
+        tag: "WhatsApp",
+        icon: "https://assets.rumahotp.com/apps/wa.png",
+        emoji: "💬",
+      },
+      {
+        name: "Telegram",
+        tag: "Telegram",
+        icon: "https://assets.rumahotp.com/apps/tg.png",
+        emoji: "✈️",
+      },
+      {
+        name: "TikTok",
+        tag: "TikTok",
+        icon: "https://assets.rumahotp.com/apps/lf.png",
+        emoji: "🎵",
+      },
+      {
+        name: "Instagram",
+        tag: "Lainnya",
+        icon: "https://assets.rumahotp.com/apps/ig.png",
+        emoji: "📸",
+      },
+      {
+        name: "Facebook",
+        tag: "Lainnya",
+        icon: "https://assets.rumahotp.com/apps/fb.png",
+        emoji: "👥",
+      },
+      {
+        name: "Google",
+        tag: "Google",
+        icon: "https://assets.rumahotp.com/apps/go.png",
+        emoji: "🔎",
+      },
+      {
+        name: "Gmail",
+        tag: "Google",
+        icon: "https://assets.rumahotp.com/apps/go.png",
+        emoji: "📧",
+      },
+      {
+        name: "Shopee",
+        tag: "Lainnya",
+        icon: "https://assets.rumahotp.com/apps/ka.png",
+        emoji: "🛍️",
+      },
     ],
     []
   );
@@ -97,13 +143,11 @@ export default function DashboardPage() {
   const filteredApps = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    // kalau user lagi search: cari dari semua apps (lebih enak)
     if (q) {
       const list = apps.filter((a) => a.name.toLowerCase().includes(q));
       return showAll ? list : list.slice(0, 8);
     }
 
-    // kalau gak search: normal pakai chip
     const list =
       filter === "Populer"
         ? apps.slice(0, 8)
@@ -136,7 +180,6 @@ export default function DashboardPage() {
       "0";
 
     const storedBal = Number(String(storedBalRaw).replace(/[^\d]/g, "")) || 0;
-
     setUser({ name: storedName, balance: storedBal });
   }, []);
 
@@ -268,7 +311,6 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          {/* dots */}
           <div className="flex items-center justify-center gap-2 pb-3 pt-2">
             {banners.map((_, i) => (
               <button
@@ -276,7 +318,9 @@ export default function DashboardPage() {
                 onClick={() => setSlide(i)}
                 className={[
                   "h-2 w-2 rounded-full",
-                  i === slide ? "bg-[var(--yinn-text)]" : "bg-[var(--yinn-border)]",
+                  i === slide
+                    ? "bg-[var(--yinn-text)]"
+                    : "bg-[var(--yinn-border)]",
                 ].join(" ")}
                 aria-label={`Slide ${i + 1}`}
               />
@@ -351,7 +395,7 @@ export default function DashboardPage() {
                 key={c}
                 onClick={() => {
                   setFilter(c);
-                  setQuery(""); // biar chip & search gak “berantem”
+                  setQuery("");
                 }}
                 className={[
                   "whitespace-nowrap rounded-full border px-4 py-2 text-sm font-semibold",
@@ -407,7 +451,7 @@ export default function DashboardPage() {
                 style={{ boxShadow: "var(--yinn-soft)" }}
               >
                 <div className="grid place-items-center">
-                  <AppLogo src={a.icon} alt={a.name} />
+                  <AppLogo src={a.icon} alt={a.name} fallback={a.emoji} />
                 </div>
                 <div className="mt-2 line-clamp-1 text-center text-xs font-extrabold">
                   {a.name}

@@ -1,123 +1,137 @@
-"use client"
+"use client";
 
-import "./login.css"
-import { useEffect, useState } from "react"
-import toast, { Toaster } from "react-hot-toast"
-import { signIn, getCsrfToken } from "next-auth/react"
-const TTL = 12 * 60 * 60 * 1000
+import "./login.css";
+import { useEffect, useState } from "react";
+import toast, { Toaster } from "react-hot-toast";
+import { signIn, getCsrfToken } from "next-auth/react";
+import { useRouter } from "next/navigation";
+
+const TTL = 12 * 60 * 60 * 1000;
+const DASHBOARD_URL = "/dashboard";
 
 function readLastSession() {
   try {
-    const raw = localStorage.getItem("yinnotp:last_session")
-    if (!raw) return null
-    const obj = JSON.parse(raw)
-    const ts = Number(obj?.ts || 0)
-    if (!ts || (Date.now() - ts) > TTL) {
-      localStorage.removeItem("yinnotp:last_session")
-      return null
+    const raw = localStorage.getItem("yinnotp:last_session");
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    const ts = Number(obj?.ts || 0);
+    if (!ts || Date.now() - ts > TTL) {
+      localStorage.removeItem("yinnotp:last_session");
+      return null;
     }
-    if (!obj?.token || !obj?.username || !obj?.email) return null
-    return { username: obj.username, email: obj.email, token: obj.token, ts }
+    if (!obj?.token || !obj?.username || !obj?.email) return null;
+    return { username: obj.username, email: obj.email, token: obj.token, ts };
   } catch {
-    try { localStorage.removeItem("yinnotp:last_session") } catch {}
-    return null
+    try {
+      localStorage.removeItem("yinnotp:last_session");
+    } catch {}
+    return null;
   }
 }
 
 export default function LoginPage() {
-  const [showPwd, setShowPwd] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [last, setLast] = useState(null)
+  const router = useRouter();
 
-  const [ident, setIdent] = useState("")
-  const [password, setPassword] = useState("")
-  const [remember, setRemember] = useState(true)
+  const [showPwd, setShowPwd] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [last, setLast] = useState(null);
+
+  const [ident, setIdent] = useState("");
+  const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(true);
 
   useEffect(() => {
-    // FIX: gak ada toast apapun pas load
-      // PREWARM NextAuth biar tombol Google/GitHub respons cepat
-    try { getCsrfToken().catch(() => {}) } catch {}
-    try { fetch("/api/auth/providers", { cache: "no-store" }).catch(() => {}) } catch {}
-    setLast(readLastSession())
-    // PREFETCH_NEXTAUTH: warm-up biar klik Google/GitHub nggak jeda
-    ;(async () => {
-      try { await getCsrfToken() } catch {}
-      try { await fetch("/api/auth/providers", { cache: "no-store" }) } catch {}
-    })()
+    // prewarm next-auth biar tombol social cepat
+    try {
+      getCsrfToken().catch(() => {});
+    } catch {}
+    try {
+      fetch("/api/auth/providers", { cache: "no-store" }).catch(() => {});
+    } catch {}
 
-  }, [])
+    setLast(readLastSession());
+  }, []);
 
   async function submitLogin(e) {
-    e.preventDefault()
-    if (loading) return
+    e.preventDefault();
+    if (loading) return;
 
-    const id = ident.trim()
-    if (!id) return toast.error("Isi username/email dulu")
-    if (!password) return toast.error("Isi password dulu")
+    const id = ident.trim();
+    if (!id) return toast.error("Isi username/email dulu");
+    if (!password) return toast.error("Isi password dulu");
 
-    setLoading(true)
+    setLoading(true);
     try {
       const r = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ident: id, password })
-      })
-      const j = await r.json().catch(() => ({}))
+        body: JSON.stringify({ ident: id, password }),
+      });
+
+      const text = await r.text();
+      const j = text ? JSON.parse(text) : {};
+
       if (!r.ok || !j.ok) {
-toast.error(j.message || "Login gagal")
-        setLoading(false)
-        return
+        toast.error(j.message || "Login gagal");
+        return;
       }
 
       if (remember && j.data?.token && j.data?.username && j.data?.email) {
-        localStorage.setItem("yinnotp:last_session", JSON.stringify({
+        const payload = {
           username: j.data.username,
           email: j.data.email,
           token: j.data.token,
-          ts: Date.now()
-        }))
-        setLast({ username: j.data.username, email: j.data.email, token: j.data.token, ts: Date.now() })
+          ts: Date.now(),
+        };
+        localStorage.setItem("yinnotp:last_session", JSON.stringify(payload));
+        setLast(payload);
       }
 
-      toast.success("Login berhasil")
-      window.location.href = "/"
+      toast.success("Login berhasil");
+
+      // ✅ redirect ke dashboard utama
+      router.replace(DASHBOARD_URL);
     } catch {
-      toast.error("Server error / koneksi putus")
+      toast.error("Server error / koneksi putus");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
   async function clickSaved() {
-    const cur = readLastSession()
+    const cur = readLastSession();
     if (!cur) {
-      toast.error("Belum ada sesi login, silakan sign in")
-      setLast(null)
-      return
+      toast.error("Belum ada sesi login, silakan sign in");
+      setLast(null);
+      return;
     }
 
-    setLoading(true)
+    setLoading(true);
     try {
       const r = await fetch("/api/auth/session_login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: cur.token })
-      })
-      const j = await r.json().catch(() => ({}))
+        body: JSON.stringify({ token: cur.token }),
+      });
+
+      const text = await r.text();
+      const j = text ? JSON.parse(text) : {};
+
       if (!r.ok || !j.ok) {
-        localStorage.removeItem("yinnotp:last_session")
-        setLast(null)
-        toast.error(j.message || "Sesi habis, silakan login ulang")
-        setLoading(false)
-        return
+        localStorage.removeItem("yinnotp:last_session");
+        setLast(null);
+        toast.error(j.message || "Sesi habis, silakan login ulang");
+        return;
       }
 
-      toast.success("Auto login berhasil")
-      window.location.href = "/"
+      toast.success("Auto login berhasil");
+
+      // ✅ redirect ke dashboard utama
+      router.replace(DASHBOARD_URL);
     } catch {
-      toast.error("Server error / koneksi putus")
+      toast.error("Server error / koneksi putus");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
@@ -134,22 +148,28 @@ toast.error(j.message || "Login gagal")
         </div>
 
         <h2>Welcome back! 👋</h2>
-        <p className="subtitle">Please sign-in to your account to view the dashboard</p>
+        <p className="subtitle">
+          Please sign-in to your account to view the dashboard
+        </p>
 
-                <div className="social-buttons">
+        <div className="social-buttons">
           <button
             className="btn-social"
             type="button"
-            onClick={() => signIn("google", { callbackUrl: "/" })}
+            onClick={() => signIn("google", { callbackUrl: DASHBOARD_URL })}
           >
-            <img src="https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png" width="18" alt="Google" />
+            <img
+              src="https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png"
+              width="18"
+              alt="Google"
+            />
             Google
           </button>
 
           <button
             className="btn-social"
             type="button"
-            onClick={() => signIn("github", { callbackUrl: "/" })}
+            onClick={() => signIn("github", { callbackUrl: DASHBOARD_URL })}
           >
             <i className="fab fa-github"></i>
             GitHub
@@ -157,15 +177,30 @@ toast.error(j.message || "Login gagal")
         </div>
 
         {last?.username && last?.email ? (
-          <div className="saved-account" onClick={clickSaved} role="button" title="Klik untuk auto login">
+          <div
+            className="saved-account"
+            onClick={clickSaved}
+            role="button"
+            title="Klik untuk auto login"
+          >
             <div className="account-info">
-              <div className="avatar">{String(last.username).slice(0, 1).toUpperCase()}</div>
+              <div className="avatar">
+                {String(last.username).slice(0, 1).toUpperCase()}
+              </div>
               <div className="account-details">
                 <p>Masuk sebagai {last.username}</p>
                 <span>{last.email}</span>
               </div>
             </div>
-            <span style={{ fontSize: 22, fontWeight: 900, color: "var(--navy-dark)" }}>☄</span>
+            <span
+              style={{
+                fontSize: 22,
+                fontWeight: 900,
+                color: "var(--navy-dark)",
+              }}
+            >
+              ☄
+            </span>
           </div>
         ) : null}
 
@@ -196,7 +231,9 @@ toast.error(j.message || "Login gagal")
                 required
               />
               <i
-                className={`fa-regular ${showPwd ? "fa-eye" : "fa-eye-slash"} suffix`}
+                className={`fa-regular ${
+                  showPwd ? "fa-eye" : "fa-eye-slash"
+                } suffix`}
                 onClick={() => setShowPwd((s) => !s)}
                 role="button"
                 aria-label="Toggle password"
@@ -206,16 +243,30 @@ toast.error(j.message || "Login gagal")
 
           <div className="form-options">
             <label className="remember-me">
-              <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+              />
               Remember Me
             </label>
-            <a href="#" className="forgot-pass" onClick={(e) => { e.preventDefault(); toast("Coming soon") }}>
+            <a
+              href="#"
+              className="forgot-pass"
+              onClick={(e) => {
+                e.preventDefault();
+                toast("Coming soon");
+              }}
+            >
               Forgot Password?
             </a>
           </div>
 
-          {/* FIX: TIDAK DISABLED. Validasi via JS, jadi warna gak pudar */}
-          <button type="submit" className="btn-submit" aria-busy={loading ? "true" : "false"}>
+          <button
+            type="submit"
+            className="btn-submit"
+            aria-busy={loading ? "true" : "false"}
+          >
             {loading ? "Memproses..." : "Masuk"}
           </button>
         </form>
@@ -225,5 +276,5 @@ toast.error(j.message || "Login gagal")
         </p>
       </div>
     </div>
-  )
+  );
 }

@@ -55,14 +55,22 @@ function getToken() {
 
 function authHeaders(uid) {
   const token = getToken();
-  const h = { "Content-Type": "application/json", "X-User-Id": uid, "X-User-Id".toLowerCase(): uid };
-  // (server lu nerima X-User-Id / X-Token, jadi aman kirim keduanya)
+
+  const h = { "Content-Type": "application/json" };
+
+  // kirim dua versi header biar backend lu yang baca salah satu tetap aman
+  if (uid) {
+    h["X-User-Id"] = uid;
+    h["x-user-id"] = uid;
+  }
+
   if (token) {
     h["Authorization"] = `Bearer ${token}`;
     h["X-Token"] = token;
     h["x-token"] = token;
     h["x-auth-token"] = token;
   }
+
   return h;
 }
 

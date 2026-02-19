@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const TTL = 12 * 60 * 60 * 1000;
 
-function safeJson(text) {
+function safeJson(t) {
   try {
-    if (!text) return null;
-    return JSON.parse(text);
+    if (!t) return null;
+    return JSON.parse(t);
   } catch {
     return null;
   }
@@ -32,7 +32,6 @@ function getActiveUserId() {
     return (
       localStorage.getItem("yinnotp_user_id") ||
       localStorage.getItem("yinnotp_active_user") ||
-      localStorage.getItem("yinnotp_username") ||
       localStorage.getItem("user_id") ||
       localStorage.getItem("username") ||
       readLastSession()?.username ||
@@ -55,29 +54,29 @@ function getToken() {
 
 function authHeaders(uid) {
   const token = getToken();
-
   const h = { "Content-Type": "application/json" };
-
-  // kirim dua versi header biar backend lu yang baca salah satu tetap aman
   if (uid) {
     h["X-User-Id"] = uid;
     h["x-user-id"] = uid;
   }
-
   if (token) {
     h["Authorization"] = `Bearer ${token}`;
     h["X-Token"] = token;
     h["x-token"] = token;
     h["x-auth-token"] = token;
   }
-
   return h;
 }
 
 function readCachedBalance(uid) {
   try {
-    const key = uid ? `yinnotp_balance:${uid}` : "";
-    const raw = (key && localStorage.getItem(key)) || localStorage.getItem("yinnotp_balance") || "0";
+    const k1 = uid ? `yinnotp_balance:${uid}` : "";
+    const raw =
+      (k1 && localStorage.getItem(k1)) ||
+      localStorage.getItem("yinnotp_balance") ||
+      localStorage.getItem("balance") ||
+      "0";
+
     const n = Number(String(raw).replace(/[^\d]/g, "")) || 0;
     return n;
   } catch {
@@ -87,109 +86,129 @@ function readCachedBalance(uid) {
 
 function writeCachedBalance(uid, bal) {
   try {
-    const b = String(Number(bal || 0) || 0);
-    if (uid) localStorage.setItem(`yinnotp_balance:${uid}`, b);
-    // legacy global biar page lain yang masih baca global tetap bener
-    localStorage.setItem("yinnotp_balance", b);
+    const n = Number(bal || 0) || 0;
+    if (uid) localStorage.setItem(`yinnotp_balance:${uid}`, String(n));
+    // legacy cache biar page lama masih kebaca
+    localStorage.setItem("yinnotp_balance", String(n));
     localStorage.setItem(`yinnotp_last_sync:${uid || "global"}`, String(Date.now()));
-    // kasih signal ke semua page yang lagi kebuka
-    window.dispatchEvent(new Event("yinnotp:balance"));
   } catch {}
 }
 
+/**
+ * Hook saldo:
+ * - tampil 0 dulu (anti-kedip)
+ * - animasi ke nilai cache
+ * - lalu sync ke backend /deposit/me biar selalu bener walau belum buka halaman deposit
+ */
 export function useAnimatedBalance({ durationMs = 650 } = {}) {
   const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
 
-  const uid = useMemo(() => (typeof window === "undefined" ? "" : getActiveUserId()), []);
-  const [targetBalance, setTargetBalance] = useState(0);
+  const [uid, setUid] = useState("");
   const [displayBalance, setDisplayBalance] = useState(0);
+  const [realBalance, setRealBalance] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  const animRef = useRef({ raf: 0, start: 0, from: 0, to: 0 });
+  const animRef = useRef(null);
 
-  function animateTo(to) {
-    cancelAnimationFrame(animRef.current.raf);
-    const from = displayBalance;
-    const start = performance.now();
+  const animateTo = useCallback(
+    (to) => {
+      const target = Number(to || 0) || 0;
 
-    animRef.current = { raf: 0, start, from, to };
+      if (animRef.current) cancelAnimationFrame(animRef.current);
 
-    const tick = (now) => {
-      const p = Math.min(1, (now - start) / Math.max(1, durationMs));
-      const val = Math.round(from + (to - from) * p);
-      setDisplayBalance(val);
-      if (p < 1) animRef.current.raf = requestAnimationFrame(tick);
-    };
+      const from = Number(displayBalance || 0) || 0;
+      const start = performance.now();
 
-    animRef.current.raf = requestAnimationFrame(tick);
-  }
+      const step = (now) => {
+        const t = Math.min(1, (now - start) / Math.max(1, durationMs));
+        const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
+        const val = Math.round(from + (target - from) * eased);
+        setDisplayBalance(val);
+        if (t < 1) animRef.current = requestAnimationFrame(step);
+      };
 
-  async function syncFromBackend() {
-    if (!backend || !uid) return;
+      animRef.current = requestAnimationFrame(step);
+    },
+    [displayBalance, durationMs]
+  );
 
-    const token = getToken();
-    if (!token) return;
-
+  const refresh = useCallback(async () => {
     try {
-      const r = await fetch(`${backend}/deposit/me?user_id=${encodeURIComponent(uid)}`, {
+      if (!backend) return;
+      const curUid = getActiveUserId();
+      const token = getToken();
+      if (!curUid || !token) return;
+
+      const r = await fetch(`${backend}/deposit/me?user_id=${encodeURIComponent(curUid)}`, {
         cache: "no-store",
-        headers: authHeaders(uid),
+        headers: authHeaders(curUid),
       });
+
       const t = await r.text();
       const j = safeJson(t);
       if (!r.ok || !j?.ok) return;
 
       const bal = Number(j.balance || 0) || 0;
-      writeCachedBalance(uid, bal);
-      setTargetBalance(bal);
-    } catch {}
-  }
+      writeCachedBalance(curUid, bal);
 
+      setRealBalance(bal);
+      animateTo(bal);
+    } catch {
+      // diem aja biar gak ganggu UI
+    }
+  }, [backend, animateTo]);
+
+  // init + anti-kedip user ganti
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // ✅ tiap masuk: reset 0 dulu biar gak “kedip” saldo akun lama
+    const curUid = getActiveUserId();
+    setUid(curUid);
+
+    // tampil 0 dulu (anti kedip saldo akun sebelumnya)
     setDisplayBalance(0);
+    setRealBalance(0);
+    setLoading(true);
 
-    // ✅ load cache lokal langsung
-    const cached = readCachedBalance(uid);
-    setTargetBalance(cached);
-    // animasi 0 -> cached
-    setTimeout(() => animateTo(cached), 30);
+    // pakai cache dulu biar cepet
+    const cached = readCachedBalance(curUid);
+    setRealBalance(cached);
+    animateTo(cached);
 
-    // ✅ langsung sync biar Home gak nunggu Deposit page
-    syncFromBackend();
+    setLoading(false);
 
-    // ✅ re-sync saat balik ke tab / buka lagi
-    const onFocus = () => syncFromBackend();
-    window.addEventListener("focus", onFocus);
+    // sync beneran ke backend
+    refresh();
 
-    // ✅ listen event custom + storage (multi tab)
-    const onBalanceEvent = () => {
-      const b = readCachedBalance(uid);
-      setTargetBalance(b);
-      animateTo(b);
+    // ketika balik ke tab, refresh lagi biar update
+    const onVis = () => {
+      if (document.visibilityState === "visible") refresh();
     };
-    window.addEventListener("yinnotp:balance", onBalanceEvent);
-    window.addEventListener("storage", onBalanceEvent);
+    document.addEventListener("visibilitychange", onVis);
 
-    // ✅ polling ringan biar selalu update walau ga buka deposit
-    const timer = setInterval(() => syncFromBackend(), 15000);
+    // kalau user ganti (page lain set localStorage), kita cek berkala ringan
+    let lastUid = curUid;
+    const uidTimer = setInterval(() => {
+      const u = getActiveUserId();
+      if (u && u !== lastUid) {
+        lastUid = u;
+        setUid(u);
+
+        setDisplayBalance(0);
+        const c = readCachedBalance(u);
+        setRealBalance(c);
+        animateTo(c);
+        refresh();
+      }
+    }, 800);
 
     return () => {
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("yinnotp:balance", onBalanceEvent);
-      window.removeEventListener("storage", onBalanceEvent);
-      clearInterval(timer);
-      cancelAnimationFrame(animRef.current.raf);
+      document.removeEventListener("visibilitychange", onVis);
+      clearInterval(uidTimer);
+      if (animRef.current) cancelAnimationFrame(animRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, backend]);
+  }, []);
 
-  // kalau targetBalance berubah dari event lain, animasi ke target
-  useEffect(() => {
-    animateTo(targetBalance);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetBalance]);
-
-  return { uid, displayBalance, targetBalance, syncFromBackend };
+  return { uid, displayBalance, realBalance, loading, refresh };
 }

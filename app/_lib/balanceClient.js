@@ -2,6 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+function safeNum(v) {
+  const n = Number(String(v ?? "").replace(/[^\d]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
 function getActiveUserId() {
   try {
     return (
@@ -18,99 +23,139 @@ function getActiveUserId() {
 
 function readBalanceForUser(uid) {
   try {
-    if (!uid) return 0;
-    const raw = localStorage.getItem(`yinnotp_balance:${uid}`);
-    const n = Number(String(raw || "0").replace(/[^\d]/g, "")) || 0;
-    return n;
+    if (!uid) return safeNum(localStorage.getItem("yinnotp_balance") || "0");
+
+    // prioritas per-user
+    const perUser = localStorage.getItem(`yinnotp_balance:${uid}`);
+    if (perUser != null) return safeNum(perUser);
+
+    // fallback legacy global
+    return safeNum(localStorage.getItem("yinnotp_balance") || "0");
   } catch {
     return 0;
   }
 }
 
-function animateNumber(from, to, ms, onUpdate) {
-  const start = performance.now();
-  const diff = to - from;
-  const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
-
-  let raf = 0;
-  const tick = (now) => {
-    const t = Math.min(1, (now - start) / ms);
-    const v = Math.round(from + diff * easeOutCubic(t));
-    onUpdate(v);
-    if (t < 1) raf = requestAnimationFrame(tick);
-  };
-
-  raf = requestAnimationFrame(tick);
-  return () => cancelAnimationFrame(raf);
+function easeOutCubic(t) {
+  return 1 - Math.pow(1 - t, 3);
 }
 
 /**
- * UI balance anti-kedip:
- * - kalau user berubah -> displayBalance langsung 0
- * - habis itu ambil saldo per-user -> animate naik
- * - listen event "storage" + custom event "yinnotp:user_changed"
+ * useAnimatedBalance
+ * - displayBalance: angka yang ditampilin (animasi)
+ * - realBalance: angka real terakhir yang kebaca dari storage
+ *
+ * Behavior:
+ * - saat user berubah => displayBalance langsung 0 (biar gak “kedip” saldo akun lama)
+ * - lalu animasi menuju balance user baru
+ * - listen storage event (kalau saldo diupdate dari halaman lain)
  */
 export function useAnimatedBalance({ durationMs = 650 } = {}) {
-  const [uid, setUid] = useState("");
-  const [displayBalance, setDisplayBalance] = useState(0);
+  const [activeUid, setActiveUid] = useState("");
   const [realBalance, setRealBalance] = useState(0);
+  const [displayBalance, setDisplayBalance] = useState(0);
 
-  const cancelRef = useRef(null);
+  const rafRef = useRef(0);
+  const animRef = useRef({
+    from: 0,
+    to: 0,
+    start: 0,
+    dur: durationMs,
+  });
 
-  const refresh = () => {
-    const nextUid = getActiveUserId();
-    setUid(nextUid);
+  const balanceKeys = useMemo(() => {
+    // key yang kita pantau
+    const uid = activeUid || "";
+    return new Set([
+      "yinnotp_active_user",
+      "yinnotp_user_id",
+      "yinnotp_username",
+      "yinnotp_balance",
+      uid ? `yinnotp_balance:${uid}` : "",
+    ]);
+  }, [activeUid]);
 
-    const nextReal = readBalanceForUser(nextUid);
-    setRealBalance(nextReal);
+  function stopAnim() {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
+  }
 
-    // reset dulu biar gak kedip saldo akun lama
+  function animateTo(target) {
+    stopAnim();
+
+    const from = Number(displayBalance) || 0;
+    const to = Number(target) || 0;
+
+    if (from === to) return;
+
+    animRef.current = { from, to, start: performance.now(), dur: durationMs };
+
+    const tick = (now) => {
+      const { from, to, start, dur } = animRef.current;
+      const t = Math.min(1, (now - start) / Math.max(1, dur));
+      const v = Math.round(from + (to - from) * easeOutCubic(t));
+      setDisplayBalance(v);
+
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+  }
+
+  function hardResetAndLoad() {
+    const uid = getActiveUserId();
+    setActiveUid(uid);
+
+    // reset tampilan dulu biar gak kedip saldo akun lama
+    stopAnim();
     setDisplayBalance(0);
 
-    // animate ke saldo bener
-    if (cancelRef.current) cancelRef.current();
-    cancelRef.current = animateNumber(0, nextReal, durationMs, setDisplayBalance);
-  };
+    const b = readBalanceForUser(uid);
+    setRealBalance(b);
+
+    // animasi ke saldo baru
+    // kasih microtask biar render 0 dulu
+    Promise.resolve().then(() => animateTo(b));
+  }
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    refresh();
+    hardResetAndLoad();
 
     const onStorage = (e) => {
-      // kalau ada perubahan user/balance di tab lain
-      if (!e) return;
-      if (
-        e.key === "yinnotp_active_user" ||
-        e.key === "yinnotp_user_id" ||
-        e.key === "yinnotp_username" ||
-        (uid && e.key === `yinnotp_balance:${uid}`) ||
-        (e.key && String(e.key).startsWith("yinnotp_balance:"))
-      ) {
-        refresh();
+      // kalau key yg relevan berubah, reload
+      const k = String(e?.key || "");
+      if (!k) return;
+      if (balanceKeys.has(k)) {
+        hardResetAndLoad();
+      }
+      // kalau per-user berubah tapi uid belum ke-set (awal), tetap reload
+      if (k.startsWith("yinnotp_balance:")) {
+        hardResetAndLoad();
       }
     };
 
-    const onUserChanged = () => refresh();
-
     window.addEventListener("storage", onStorage);
-    window.addEventListener("yinnotp:user_changed", onUserChanged);
+
+    // jaga-jaga: kalau user ganti lewat code yg gak trigger storage (same tab),
+    // kita poll ringan tiap 1.5s cek uid
+    let lastUid = getActiveUserId();
+    const itv = setInterval(() => {
+      const cur = getActiveUserId();
+      if (cur !== lastUid) {
+        lastUid = cur;
+        hardResetAndLoad();
+      }
+    }, 1500);
 
     return () => {
+      stopAnim();
       window.removeEventListener("storage", onStorage);
-      window.removeEventListener("yinnotp:user_changed", onUserChanged);
-      if (cancelRef.current) cancelRef.current();
+      clearInterval(itv);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [balanceKeys]);
 
-  return useMemo(
-    () => ({
-      uid,
-      displayBalance,
-      realBalance,
-      refresh,
-    }),
-    [uid, displayBalance, realBalance]
-  );
+  return { displayBalance, realBalance, activeUid };
 }

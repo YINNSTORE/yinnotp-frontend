@@ -94,6 +94,26 @@ function makeUserCode(username) {
   return `YINN-${base}`;
 }
 
+function dtFmt(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function isDepositSuccess(it) {
+  if (!it) return false;
+  if (it.credited === true) return true;
+  const s = String(it.status || it.state || "").toLowerCase();
+  return s.includes("success") || s.includes("paid") || s.includes("completed") || s.includes("settled");
+}
+
 export default function ProfilePage() {
   const backend = normBackend(process.env.NEXT_PUBLIC_BACKEND_URL);
 
@@ -113,7 +133,6 @@ export default function ProfilePage() {
     created_at: null,
     orders: 0,
     deposits: 0,
-    ppob: 0,
   });
 
   const [form, setForm] = useState({
@@ -132,9 +151,8 @@ export default function ProfilePage() {
     () => [
       { label: "Orders", value: view.orders ?? 0 },
       { label: "Deposit", value: view.deposits ?? 0 },
-      { label: "PPOB", value: view.ppob ?? 0 },
     ],
-    [view.orders, view.deposits, view.ppob]
+    [view.orders, view.deposits]
   );
 
   function loadLocal(u) {
@@ -173,7 +191,6 @@ export default function ProfilePage() {
       created_at: p?.created_at ?? v.created_at,
       orders: Number(p?.orders ?? v.orders ?? 0) || 0,
       deposits: Number(p?.deposits ?? v.deposits ?? 0) || 0,
-      ppob: Number(p?.ppob ?? v.ppob ?? 0) || 0,
     }));
 
     setForm({
@@ -185,7 +202,7 @@ export default function ProfilePage() {
     });
   }
 
-  async function trySyncRemote(u) {
+  async function trySyncUserRemote(u) {
     const token = getTokenForUser(u);
     if (!backend || !u || !token) return;
 
@@ -209,7 +226,6 @@ export default function ProfilePage() {
         created_at: raw?.created_at ?? null,
         orders: Number(raw?.orders ?? 0) || 0,
         deposits: Number(raw?.deposits ?? 0) || 0,
-        ppob: Number(raw?.ppob ?? 0) || 0,
       };
 
       localStorage.setItem(profileKey(u), JSON.stringify(merged));
@@ -227,12 +243,37 @@ export default function ProfilePage() {
     } catch {}
   }
 
+  async function trySyncDepositCount(u) {
+    const token = getTokenForUser(u);
+    if (!backend || !u || !token) return;
+
+    try {
+      const r = await fetch(`${backend}/deposit/me?user_id=${encodeURIComponent(u)}`, {
+        cache: "no-store",
+        headers: authHeaders(u, token),
+      });
+      const t = await r.text();
+      const j = safeJson(t);
+      if (!r.ok || !j || j.ok === false) return;
+
+      const hist = Array.isArray(j.history) ? j.history : [];
+      const successCount = hist.filter(isDepositSuccess).length;
+
+      const p = safeJson(localStorage.getItem(profileKey(u)));
+      const next = { ...p, deposits: successCount };
+      localStorage.setItem(profileKey(u), JSON.stringify(next));
+
+      loadLocal(u);
+    } catch {}
+  }
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const u = getActiveUserId();
     setUid(u);
     loadLocal(u);
-    trySyncRemote(u);
+    trySyncUserRemote(u);
+    trySyncDepositCount(u);
   }, []);
 
   async function onPickAvatar(e) {
@@ -278,7 +319,6 @@ export default function ProfilePage() {
       created_at: view.created_at,
       orders: view.orders,
       deposits: view.deposits,
-      ppob: view.ppob,
     };
 
     setSavingProfile(true);
@@ -308,6 +348,7 @@ export default function ProfilePage() {
       loadLocal(uid);
       toast.success("Profile tersimpan");
       setTab("profile");
+      trySyncDepositCount(uid);
     } finally {
       setSavingProfile(false);
     }
@@ -374,19 +415,6 @@ export default function ProfilePage() {
     toast.success("Logout");
     window.location.href = "/login";
   }
-
-  const dtFmt = (ts) => {
-    if (!ts) return "—";
-    const d = new Date(ts);
-    if (Number.isNaN(d.getTime())) return "—";
-    return d.toLocaleString("id-ID", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
 
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
@@ -489,7 +517,7 @@ export default function ProfilePage() {
                 <div className="text-lg font-extrabold">{view.username}</div>
                 <div className="text-sm text-[var(--yinn-muted)]">{view.name}</div>
 
-                <div className="mt-3 flex items-center justify-center gap-6">
+                <div className="mt-3 flex items-center justify-center gap-8">
                   {stats.map((s) => (
                     <div key={s.label} className="text-center">
                       <div className="text-base font-extrabold">{Number(s.value || 0)}</div>

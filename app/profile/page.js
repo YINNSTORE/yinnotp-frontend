@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import toast, { Toaster } from "react-hot-toast";
-import BottomNav from "../components/BottomNav";
-import ThemeMenu from "../components/ThemeMenu";
+import BottomNav from "../../components/BottomNav";
+import ThemeMenu from "../../components/ThemeMenu";
 import { Camera, LogOut, Save, Settings, User2 } from "lucide-react";
 
 const formatIDR = (n) =>

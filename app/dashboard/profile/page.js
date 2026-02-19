@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import toast, { Toaster } from "react-hot-toast";
-import BottomNav from "../../components/BottomNav";
 import ThemeMenu from "../../components/ThemeMenu";
+import BottomNav from "../../components/BottomNav";
 import { Camera, LogOut, Save, Settings, User2 } from "lucide-react";
 
 const formatIDR = (n) =>
@@ -86,17 +85,13 @@ function readFileAsDataURL(file) {
   });
 }
 
-function dtFmt(ts) {
-  if (!ts) return "—";
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("id-ID", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function makeUserCode(username) {
+  const s = String(username || "").trim().toUpperCase();
+  if (!s) return "—";
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  const base = h.toString(36).toUpperCase().padStart(6, "0").slice(0, 6);
+  return `YINN-${base}`;
 }
 
 export default function ProfilePage() {
@@ -110,14 +105,12 @@ export default function ProfilePage() {
   const fileRef = useRef(null);
 
   const [view, setView] = useState({
-    id: "—",
     username: "—",
     name: "User",
     email: "—",
     telegram_id: "—",
     whatsapp: "—",
     created_at: null,
-    last_login: null,
     orders: 0,
     deposits: 0,
     ppob: 0,
@@ -159,7 +152,6 @@ export default function ProfilePage() {
     const email = p?.email || localStorage.getItem("yinnotp_email") || "—";
     const telegram_id = p?.telegram_id || "—";
     const whatsapp = p?.whatsapp || "—";
-    const id = p?.id || localStorage.getItem("yinnotp_user_id") || u || "—";
 
     const b =
       Number(String(localStorage.getItem(balanceKey(u)) || "0").replace(/[^\d]/g, "")) ||
@@ -173,14 +165,12 @@ export default function ProfilePage() {
 
     setView((v) => ({
       ...v,
-      id,
       username,
       name,
       email,
       telegram_id,
       whatsapp,
       created_at: p?.created_at ?? v.created_at,
-      last_login: p?.last_login ?? v.last_login,
       orders: Number(p?.orders ?? v.orders ?? 0) || 0,
       deposits: Number(p?.deposits ?? v.deposits ?? 0) || 0,
       ppob: Number(p?.ppob ?? v.ppob ?? 0) || 0,
@@ -208,26 +198,29 @@ export default function ProfilePage() {
       const j = safeJson(t);
       if (!r.ok || !j) return;
 
+      const raw = j?.user ? j.user : j;
+
       const merged = {
-        id: j?.id ?? j?.user_id ?? u,
-        username: j?.username ?? localStorage.getItem("yinnotp_username") ?? "—",
-        name: j?.name ?? localStorage.getItem("yinnotp_name") ?? "User",
-        email: j?.email ?? "—",
-        telegram_id: j?.telegram_id ?? "—",
-        whatsapp: j?.whatsapp ?? "—",
-        created_at: j?.created_at ?? null,
-        last_login: j?.last_login ?? null,
-        orders: Number(j?.orders ?? 0) || 0,
-        deposits: Number(j?.deposits ?? 0) || 0,
-        ppob: Number(j?.ppob ?? 0) || 0,
+        username: raw?.username ?? raw?.name ?? localStorage.getItem("yinnotp_username") ?? "—",
+        name: raw?.name ?? localStorage.getItem("yinnotp_name") ?? "User",
+        email: raw?.email ?? "—",
+        telegram_id: raw?.telegram_id ?? "—",
+        whatsapp: raw?.whatsapp ?? "—",
+        created_at: raw?.created_at ?? null,
+        orders: Number(raw?.orders ?? 0) || 0,
+        deposits: Number(raw?.deposits ?? 0) || 0,
+        ppob: Number(raw?.ppob ?? 0) || 0,
       };
 
       localStorage.setItem(profileKey(u), JSON.stringify(merged));
 
-      if (typeof j?.balance !== "undefined") {
-        localStorage.setItem(balanceKey(u), String(j.balance || 0));
-        localStorage.setItem("yinnotp_balance", String(j.balance || 0));
-        setBalance(Number(j.balance || 0) || 0);
+      const balVal =
+        typeof raw?.balance !== "undefined" ? raw.balance : typeof j?.balance !== "undefined" ? j.balance : undefined;
+
+      if (typeof balVal !== "undefined") {
+        localStorage.setItem(balanceKey(u), String(balVal || 0));
+        localStorage.setItem("yinnotp_balance", String(balVal || 0));
+        setBalance(Number(balVal || 0) || 0);
       }
 
       loadLocal(u);
@@ -237,59 +230,9 @@ export default function ProfilePage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const u = getActiveUserId();
-    if (!u) {
-      window.location.href = "/login";
-      return;
-    }
     setUid(u);
     loadLocal(u);
     trySyncRemote(u);
-
-    const onStorage = (e) => {
-      if (!e?.key) return;
-      if (
-        e.key === "yinnotp_active_user" ||
-        e.key === `yinnotp_balance:${u}` ||
-        e.key === "yinnotp_balance" ||
-        e.key === `yinnotp_profile:${u}` ||
-        e.key === "yinnotp_name" ||
-        e.key === "yinnotp_username" ||
-        e.key === avatarKey(u)
-      ) {
-        const nu = getActiveUserId();
-        if (nu && nu !== u) {
-          setUid(nu);
-          loadLocal(nu);
-          trySyncRemote(nu);
-        } else {
-          loadLocal(u);
-        }
-      }
-    };
-
-    window.addEventListener("storage", onStorage);
-
-    const onFocus = () => {
-      const nu = getActiveUserId();
-      if (!nu) return;
-      if (nu !== u) {
-        setUid(nu);
-        loadLocal(nu);
-        trySyncRemote(nu);
-      } else {
-        loadLocal(u);
-        trySyncRemote(u);
-      }
-    };
-
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onFocus);
-
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onFocus);
-    };
   }, []);
 
   async function onPickAvatar(e) {
@@ -327,14 +270,12 @@ export default function ProfilePage() {
   async function saveProfile() {
     const next = {
       ...safeJson(localStorage.getItem(profileKey(uid))),
-      id: view.id,
       username: String(form.username || "").trim() || view.username,
       name: String(form.name || "").trim() || view.name,
       email: String(form.email || "").trim() || view.email,
       telegram_id: String(form.telegram_id || "").trim() || "—",
       whatsapp: String(form.whatsapp || "").trim() || "—",
       created_at: view.created_at,
-      last_login: view.last_login,
       orders: view.orders,
       deposits: view.deposits,
       ppob: view.ppob,
@@ -434,6 +375,19 @@ export default function ProfilePage() {
     window.location.href = "/login";
   }
 
+  const dtFmt = (ts) => {
+    if (!ts) return "—";
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleString("id-ID", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
       <Toaster position="top-right" />
@@ -464,9 +418,7 @@ export default function ProfilePage() {
             onClick={() => setTab("profile")}
             className={[
               "inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-extrabold",
-              tab === "profile"
-                ? "border-transparent text-white"
-                : "border-[var(--yinn-border)] bg-[var(--yinn-surface)]",
+              tab === "profile" ? "border-transparent text-white" : "border-[var(--yinn-border)] bg-[var(--yinn-surface)]",
             ].join(" ")}
             style={
               tab === "profile"
@@ -481,9 +433,7 @@ export default function ProfilePage() {
             onClick={() => setTab("setting")}
             className={[
               "inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-extrabold",
-              tab === "setting"
-                ? "border-transparent text-white"
-                : "border-[var(--yinn-border)] bg-[var(--yinn-surface)]",
+              tab === "setting" ? "border-transparent text-white" : "border-[var(--yinn-border)] bg-[var(--yinn-surface)]",
             ].join(" ")}
             style={
               tab === "setting"
@@ -518,9 +468,7 @@ export default function ProfilePage() {
                   {avatar ? (
                     <img src={avatar} alt="avatar" className="h-full w-full object-cover" loading="lazy" />
                   ) : (
-                    <div className="text-4xl font-extrabold text-[var(--yinn-text)]">
-                      {initialFromName(view.name)}
-                    </div>
+                    <div className="text-4xl font-extrabold text-[var(--yinn-text)]">{initialFromName(view.name)}</div>
                   )}
                 </div>
 
@@ -534,13 +482,7 @@ export default function ProfilePage() {
                   <Camera size={16} />
                 </button>
 
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/png,image/jpeg"
-                  className="hidden"
-                  onChange={onPickAvatar}
-                />
+                <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={onPickAvatar} />
               </div>
 
               <div className="mt-3 text-center">
@@ -562,7 +504,7 @@ export default function ProfilePage() {
               <div className="grid gap-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[var(--yinn-muted)]">ID</span>
-                  <span className="font-extrabold">{view.id}</span>
+                  <span className="font-extrabold">{makeUserCode(view.username)}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-[var(--yinn-muted)]">Username</span>
@@ -588,10 +530,6 @@ export default function ProfilePage() {
                   <span className="text-[var(--yinn-muted)]">Account Created</span>
                   <span className="font-extrabold">{dtFmt(view.created_at)}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[var(--yinn-muted)]">Last Login</span>
-                  <span className="font-extrabold">{dtFmt(view.last_login)}</span>
-                </div>
               </div>
             </div>
 
@@ -612,16 +550,10 @@ export default function ProfilePage() {
             </div>
 
             <div className="mt-2 flex gap-2">
-              <button
-                onClick={() => fileRef.current?.click()}
-                className="flex-1 rounded-xl border border-[var(--yinn-border)] px-3 py-2 text-sm font-bold"
-              >
+              <button onClick={() => fileRef.current?.click()} className="flex-1 rounded-xl border border-[var(--yinn-border)] px-3 py-2 text-sm font-bold">
                 Upload
               </button>
-              <button
-                onClick={removeAvatar}
-                className="flex-1 rounded-xl border border-[var(--yinn-border)] px-3 py-2 text-sm font-bold"
-              >
+              <button onClick={removeAvatar} className="flex-1 rounded-xl border border-[var(--yinn-border)] px-3 py-2 text-sm font-bold">
                 Remove
               </button>
             </div>
@@ -693,10 +625,7 @@ export default function ProfilePage() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 pt-1">
-                  <button
-                    onClick={() => loadLocal(uid)}
-                    className="rounded-xl border border-[var(--yinn-border)] px-3 py-3 text-sm font-extrabold"
-                  >
+                  <button onClick={() => loadLocal(uid)} className="rounded-xl border border-[var(--yinn-border)] px-3 py-3 text-sm font-extrabold">
                     Reset
                   </button>
                   <button
@@ -722,9 +651,7 @@ export default function ProfilePage() {
               }}
             >
               <div className="text-sm font-extrabold">Change Password</div>
-              <div className="mt-1 text-xs text-[var(--yinn-muted)]">
-                Minimum 8 characters, at least 1 uppercase, at least 1 number
-              </div>
+              <div className="mt-1 text-xs text-[var(--yinn-muted)]">Minimum 8 characters, at least 1 uppercase, at least 1 number</div>
 
               <div className="mt-4 grid gap-3">
                 <div>

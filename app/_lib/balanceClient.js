@@ -2,18 +2,40 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-function safeNum(v) {
-  const n = Number(String(v ?? "").replace(/[^\d]/g, ""));
-  return Number.isFinite(n) ? n : 0;
+const TTL = 12 * 60 * 60 * 1000;
+
+function safeJson(text) {
+  try {
+    if (!text) return null;
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function readLastSession() {
+  try {
+    const raw = localStorage.getItem("yinnotp:last_session");
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    const ts = Number(obj?.ts || 0);
+    if (!ts || Date.now() - ts > TTL) return null;
+    if (!obj?.token) return null;
+    return obj;
+  } catch {
+    return null;
+  }
 }
 
 function getActiveUserId() {
   try {
     return (
-      localStorage.getItem("yinnotp_active_user") ||
       localStorage.getItem("yinnotp_user_id") ||
+      localStorage.getItem("yinnotp_active_user") ||
       localStorage.getItem("yinnotp_username") ||
+      localStorage.getItem("user_id") ||
       localStorage.getItem("username") ||
+      readLastSession()?.username ||
       ""
     );
   } catch {
@@ -21,141 +43,145 @@ function getActiveUserId() {
   }
 }
 
-function readBalanceForUser(uid) {
+function getToken() {
   try {
-    if (!uid) return safeNum(localStorage.getItem("yinnotp_balance") || "0");
+    const s = readLastSession();
+    if (s?.token) return String(s.token);
+    return String(localStorage.getItem("yinnotp_token") || "");
+  } catch {
+    return "";
+  }
+}
 
-    // prioritas per-user
-    const perUser = localStorage.getItem(`yinnotp_balance:${uid}`);
-    if (perUser != null) return safeNum(perUser);
+function authHeaders(uid) {
+  const token = getToken();
+  const h = { "Content-Type": "application/json", "X-User-Id": uid, "X-User-Id".toLowerCase(): uid };
+  // (server lu nerima X-User-Id / X-Token, jadi aman kirim keduanya)
+  if (token) {
+    h["Authorization"] = `Bearer ${token}`;
+    h["X-Token"] = token;
+    h["x-token"] = token;
+    h["x-auth-token"] = token;
+  }
+  return h;
+}
 
-    // fallback legacy global
-    return safeNum(localStorage.getItem("yinnotp_balance") || "0");
+function readCachedBalance(uid) {
+  try {
+    const key = uid ? `yinnotp_balance:${uid}` : "";
+    const raw = (key && localStorage.getItem(key)) || localStorage.getItem("yinnotp_balance") || "0";
+    const n = Number(String(raw).replace(/[^\d]/g, "")) || 0;
+    return n;
   } catch {
     return 0;
   }
 }
 
-function easeOutCubic(t) {
-  return 1 - Math.pow(1 - t, 3);
+function writeCachedBalance(uid, bal) {
+  try {
+    const b = String(Number(bal || 0) || 0);
+    if (uid) localStorage.setItem(`yinnotp_balance:${uid}`, b);
+    // legacy global biar page lain yang masih baca global tetap bener
+    localStorage.setItem("yinnotp_balance", b);
+    localStorage.setItem(`yinnotp_last_sync:${uid || "global"}`, String(Date.now()));
+    // kasih signal ke semua page yang lagi kebuka
+    window.dispatchEvent(new Event("yinnotp:balance"));
+  } catch {}
 }
 
-/**
- * useAnimatedBalance
- * - displayBalance: angka yang ditampilin (animasi)
- * - realBalance: angka real terakhir yang kebaca dari storage
- *
- * Behavior:
- * - saat user berubah => displayBalance langsung 0 (biar gak “kedip” saldo akun lama)
- * - lalu animasi menuju balance user baru
- * - listen storage event (kalau saldo diupdate dari halaman lain)
- */
 export function useAnimatedBalance({ durationMs = 650 } = {}) {
-  const [activeUid, setActiveUid] = useState("");
-  const [realBalance, setRealBalance] = useState(0);
+  const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
+
+  const uid = useMemo(() => (typeof window === "undefined" ? "" : getActiveUserId()), []);
+  const [targetBalance, setTargetBalance] = useState(0);
   const [displayBalance, setDisplayBalance] = useState(0);
 
-  const rafRef = useRef(0);
-  const animRef = useRef({
-    from: 0,
-    to: 0,
-    start: 0,
-    dur: durationMs,
-  });
+  const animRef = useRef({ raf: 0, start: 0, from: 0, to: 0 });
 
-  const balanceKeys = useMemo(() => {
-    // key yang kita pantau
-    const uid = activeUid || "";
-    return new Set([
-      "yinnotp_active_user",
-      "yinnotp_user_id",
-      "yinnotp_username",
-      "yinnotp_balance",
-      uid ? `yinnotp_balance:${uid}` : "",
-    ]);
-  }, [activeUid]);
+  function animateTo(to) {
+    cancelAnimationFrame(animRef.current.raf);
+    const from = displayBalance;
+    const start = performance.now();
 
-  function stopAnim() {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = 0;
-  }
-
-  function animateTo(target) {
-    stopAnim();
-
-    const from = Number(displayBalance) || 0;
-    const to = Number(target) || 0;
-
-    if (from === to) return;
-
-    animRef.current = { from, to, start: performance.now(), dur: durationMs };
+    animRef.current = { raf: 0, start, from, to };
 
     const tick = (now) => {
-      const { from, to, start, dur } = animRef.current;
-      const t = Math.min(1, (now - start) / Math.max(1, dur));
-      const v = Math.round(from + (to - from) * easeOutCubic(t));
-      setDisplayBalance(v);
-
-      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+      const p = Math.min(1, (now - start) / Math.max(1, durationMs));
+      const val = Math.round(from + (to - from) * p);
+      setDisplayBalance(val);
+      if (p < 1) animRef.current.raf = requestAnimationFrame(tick);
     };
 
-    rafRef.current = requestAnimationFrame(tick);
+    animRef.current.raf = requestAnimationFrame(tick);
   }
 
-  function hardResetAndLoad() {
-    const uid = getActiveUserId();
-    setActiveUid(uid);
+  async function syncFromBackend() {
+    if (!backend || !uid) return;
 
-    // reset tampilan dulu biar gak kedip saldo akun lama
-    stopAnim();
-    setDisplayBalance(0);
+    const token = getToken();
+    if (!token) return;
 
-    const b = readBalanceForUser(uid);
-    setRealBalance(b);
+    try {
+      const r = await fetch(`${backend}/deposit/me?user_id=${encodeURIComponent(uid)}`, {
+        cache: "no-store",
+        headers: authHeaders(uid),
+      });
+      const t = await r.text();
+      const j = safeJson(t);
+      if (!r.ok || !j?.ok) return;
 
-    // animasi ke saldo baru
-    // kasih microtask biar render 0 dulu
-    Promise.resolve().then(() => animateTo(b));
+      const bal = Number(j.balance || 0) || 0;
+      writeCachedBalance(uid, bal);
+      setTargetBalance(bal);
+    } catch {}
   }
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    hardResetAndLoad();
+    // ✅ tiap masuk: reset 0 dulu biar gak “kedip” saldo akun lama
+    setDisplayBalance(0);
 
-    const onStorage = (e) => {
-      // kalau key yg relevan berubah, reload
-      const k = String(e?.key || "");
-      if (!k) return;
-      if (balanceKeys.has(k)) {
-        hardResetAndLoad();
-      }
-      // kalau per-user berubah tapi uid belum ke-set (awal), tetap reload
-      if (k.startsWith("yinnotp_balance:")) {
-        hardResetAndLoad();
-      }
+    // ✅ load cache lokal langsung
+    const cached = readCachedBalance(uid);
+    setTargetBalance(cached);
+    // animasi 0 -> cached
+    setTimeout(() => animateTo(cached), 30);
+
+    // ✅ langsung sync biar Home gak nunggu Deposit page
+    syncFromBackend();
+
+    // ✅ re-sync saat balik ke tab / buka lagi
+    const onFocus = () => syncFromBackend();
+    window.addEventListener("focus", onFocus);
+
+    // ✅ listen event custom + storage (multi tab)
+    const onBalanceEvent = () => {
+      const b = readCachedBalance(uid);
+      setTargetBalance(b);
+      animateTo(b);
     };
+    window.addEventListener("yinnotp:balance", onBalanceEvent);
+    window.addEventListener("storage", onBalanceEvent);
 
-    window.addEventListener("storage", onStorage);
-
-    // jaga-jaga: kalau user ganti lewat code yg gak trigger storage (same tab),
-    // kita poll ringan tiap 1.5s cek uid
-    let lastUid = getActiveUserId();
-    const itv = setInterval(() => {
-      const cur = getActiveUserId();
-      if (cur !== lastUid) {
-        lastUid = cur;
-        hardResetAndLoad();
-      }
-    }, 1500);
+    // ✅ polling ringan biar selalu update walau ga buka deposit
+    const timer = setInterval(() => syncFromBackend(), 15000);
 
     return () => {
-      stopAnim();
-      window.removeEventListener("storage", onStorage);
-      clearInterval(itv);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("yinnotp:balance", onBalanceEvent);
+      window.removeEventListener("storage", onBalanceEvent);
+      clearInterval(timer);
+      cancelAnimationFrame(animRef.current.raf);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [balanceKeys]);
+  }, [uid, backend]);
 
-  return { displayBalance, realBalance, activeUid };
+  // kalau targetBalance berubah dari event lain, animasi ke target
+  useEffect(() => {
+    animateTo(targetBalance);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetBalance]);
+
+  return { uid, displayBalance, targetBalance, syncFromBackend };
 }

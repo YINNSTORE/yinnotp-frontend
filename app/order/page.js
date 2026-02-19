@@ -79,6 +79,39 @@ function minPriceFromCountry(country) {
   return Math.min(...prices);
 }
 
+/**
+ * Flag URL resolver:
+ * 1) pakai country.img (paling benar sesuai docs RumahOTP)
+ * 2) fallback iso_code -> https://assets.rumahotp.com/flags/{code}.png (dengan beberapa pengecualian)
+ * 3) fallback name map untuk yang aneh (contoh "United States (virtual)")
+ */
+const NAME_TO_FLAG = {
+  [normalizeName("United States (virtual)")]: "https://assets.rumahotp.com/flags/uv.png",
+  [normalizeName("Gibraltar")]: "https://assets.rumahotp.com/flags/gib.png",
+  [normalizeName("Argentinas")]: "https://assets.rumahotp.com/flags/ar.png",
+  [normalizeName("Viet nam")]: "https://assets.rumahotp.com/flags/vn.png",
+};
+
+const ISO_FIX = {
+  gi: "gib", // Gibraltar
+  uk: "gb",  // kadang ada iso_code "uk"
+};
+
+function flagUrl(country) {
+  const img = country?.img;
+  if (typeof img === "string" && img.startsWith("http")) return img;
+
+  const byName = NAME_TO_FLAG[normalizeName(country?.name)];
+  if (byName) return byName;
+
+  let iso = String(country?.iso_code || "").toLowerCase().trim();
+  if (!iso) return "";
+  iso = ISO_FIX[iso] || iso;
+
+  // kalau iso_code udah berupa "gib" / "uv" dll, langsung jalan juga
+  return `https://assets.rumahotp.com/flags/${iso}.png`;
+}
+
 /* ================= UI components ================= */
 
 function Shimmer({ className = "" }) {
@@ -357,6 +390,7 @@ export default function OrderPage() {
     const cid = String(country?.number_id || "");
     const pid = String(provider?.provider_id || "");
     const countryName = String(country?.name || "");
+
     if (!cid || !pid || !countryName) {
       toast.error("Data negara/provider tidak valid");
       return;
@@ -799,27 +833,30 @@ export default function OrderPage() {
             <div className="rounded-2xl border border-[var(--yinn-border)]">
               <div className="divide-y divide-[var(--yinn-border)]">
                 {filteredCountries.map((c) => {
-                  const open =
-                    String(expandedCountryId) === String(c?.number_id);
+                  const open = String(expandedCountryId) === String(c?.number_id);
                   const minp = minPriceFromCountry(c);
-                  const pricelist = Array.isArray(c?.pricelist)
-                    ? c.pricelist
-                    : [];
+                  const pricelist = Array.isArray(c?.pricelist) ? c.pricelist : [];
+                  const flag = flagUrl(c);
 
                   return (
                     <div key={String(c?.number_id || Math.random())}>
                       <button
                         className="flex w-full items-center gap-3 p-3 text-left hover:bg-black/5 dark:hover:bg-white/5"
                         onClick={() => {
-                          setExpandedCountryId(
-                            open ? "" : String(c?.number_id || "")
-                          );
+                          setExpandedCountryId(open ? "" : String(c?.number_id || ""));
                         }}
                       >
-                        <div className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
-                          <div className="text-sm font-extrabold">
-                            {String(c?.flag || "").trim() || "🏳️"}
-                          </div>
+                        <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
+                          {flag ? (
+                            <img
+                              src={flag}
+                              alt={c?.name || "flag"}
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="text-xs font-extrabold">🏳️</div>
+                          )}
                         </div>
 
                         <div className="min-w-0 flex-1">
@@ -828,12 +865,10 @@ export default function OrderPage() {
                           </div>
                           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-[var(--yinn-muted)]">
                             <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                              {c?.prefix
-                                ? `+${String(c.prefix).replace("+", "")}`
-                                : "—"}
+                              {c?.prefix ? c.prefix : "—"}
                             </span>
                             <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                              {c?.short ? String(c.short) : "—"}
+                              stock {Number(c?.stock_total || 0)}
                             </span>
                             <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
                               Mulai {minp ? formatIDR(minp) : "—"}
@@ -851,7 +886,7 @@ export default function OrderPage() {
                       </button>
 
                       {open && (
-                        <div className="bg-black/0 px-3 pb-3">
+                        <div className="px-3 pb-3">
                           {pricelist.length === 0 ? (
                             <div className="rounded-2xl border border-[var(--yinn-border)] p-3 text-xs text-[var(--yinn-muted)]">
                               Provider kosong / stok habis untuk negara ini.
@@ -861,10 +896,12 @@ export default function OrderPage() {
                               <div className="divide-y divide-[var(--yinn-border)]">
                                 {pricelist.map((p) => {
                                   const pid = String(p?.provider_id || "");
-                                  const key = `${String(
-                                    c?.number_id || ""
-                                  )}-${pid}`;
+                                  const key = `${String(c?.number_id || "")}-${pid}`;
                                   const loading = orderingKey === key;
+
+                                  const serverId = p?.server_id ?? p?.server ?? "-";
+                                  const stock = Number(p?.stock || 0);
+                                  const price = Number(p?.price || 0);
 
                                   return (
                                     <div key={pid} className="relative">
@@ -878,22 +915,19 @@ export default function OrderPage() {
                                       <div className="flex items-center gap-2 p-3">
                                         <div className="flex flex-wrap items-center gap-2">
                                           <span className="rounded-full bg-blue-500/10 px-2 py-1 text-[11px] font-extrabold text-blue-600">
-                                            Server{" "}
-                                            {Number(p?.server || 0).toFixed(1)}
+                                            Server {String(serverId)}
                                           </span>
                                           <span className="rounded-full bg-black/5 px-2 py-1 text-[11px] font-bold text-[var(--yinn-muted)] dark:bg-white/5">
-                                            ID: {pid || "—"}
+                                            stock {stock}
                                           </span>
-                                          {p?.rate ? (
-                                            <span className="rounded-full bg-rose-500/10 px-2 py-1 text-[11px] font-extrabold text-rose-600">
-                                              {String(p.rate)}
-                                            </span>
-                                          ) : null}
+                                          <span className="rounded-full bg-black/5 px-2 py-1 text-[11px] font-bold text-[var(--yinn-muted)] dark:bg-white/5">
+                                            id {pid}
+                                          </span>
                                         </div>
 
                                         <div className="ms-auto flex items-center gap-2">
                                           <div className="text-sm font-extrabold">
-                                            {formatIDR(Number(p?.price || 0) || 0)}
+                                            {price ? formatIDR(price) : "—"}
                                           </div>
                                           <button
                                             onClick={() => orderFromProvider(c, p)}
@@ -958,16 +992,9 @@ export default function OrderPage() {
                 className="rounded-2xl border border-[var(--yinn-border)] p-3 text-center hover:bg-black/5 dark:hover:bg-white/5"
               >
                 <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
-                  <img
-                    src={p.img}
-                    alt={p.name}
-                    className="h-9 w-9"
-                    loading="lazy"
-                  />
+                  <img src={p.img} alt={p.name} className="h-9 w-9" loading="lazy" />
                 </div>
-                <div className="mt-2 truncate text-xs font-extrabold">
-                  {p.name}
-                </div>
+                <div className="mt-2 truncate text-xs font-extrabold">{p.name}</div>
               </button>
             ))}
           </div>
@@ -1001,17 +1028,12 @@ export default function OrderPage() {
                       />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-extrabold">
-                        {s.service_name}
-                      </div>
+                      <div className="truncate text-sm font-extrabold">{s.service_name}</div>
                       <div className="truncate text-[11px] text-[var(--yinn-muted)]">
                         Tap untuk pilih
                       </div>
                     </div>
-                    <ChevronRight
-                      size={18}
-                      className="text-[var(--yinn-muted)]"
-                    />
+                    <ChevronRight size={18} className="text-[var(--yinn-muted)]" />
                   </button>
                 ))}
                 {!filteredServices.length && (

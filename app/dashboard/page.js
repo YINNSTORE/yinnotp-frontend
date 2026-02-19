@@ -15,6 +15,9 @@ import {
   Sparkles,
 } from "lucide-react";
 
+// ✅ ADD
+import { useAnimatedBalance } from "../_lib/balanceClient";
+
 const formatIDR = (n) =>
   new Intl.NumberFormat("id-ID", {
     style: "currency",
@@ -54,7 +57,12 @@ export default function DashboardPage() {
   const [showAll, setShowAll] = useState(false);
   const [query, setQuery] = useState("");
 
-  const [user, setUser] = useState({ name: "User", balance: 0 });
+  // ❌ jangan simpan balance di state user (ini yg bikin kedip saldo akun lama)
+  // const [user, setUser] = useState({ name: "User", balance: 0 });
+  const [user, setUser] = useState({ name: "User" });
+
+  // ✅ saldo animasi (0 dulu lalu naik)
+  const { displayBalance } = useAnimatedBalance({ durationMs: 650 });
 
   const banners = useMemo(
     () => [
@@ -85,7 +93,6 @@ export default function DashboardPage() {
     []
   );
 
-  // ✅ icon pakai link yang lu kasih
   const apps = useMemo(
     () => [
       {
@@ -170,17 +177,13 @@ export default function DashboardPage() {
 
     const storedName =
       localStorage.getItem("yinnotp_name") ||
+      localStorage.getItem("yinnotp_username") ||
+      localStorage.getItem("yinnotp_active_user") ||
       localStorage.getItem("username") ||
       localStorage.getItem("name") ||
       "User";
 
-    const storedBalRaw =
-      localStorage.getItem("yinnotp_balance") ||
-      localStorage.getItem("balance") ||
-      "0";
-
-    const storedBal = Number(String(storedBalRaw).replace(/[^\d]/g, "")) || 0;
-    setUser({ name: storedName, balance: storedBal });
+    setUser({ name: storedName });
   }, []);
 
   return (
@@ -216,9 +219,12 @@ export default function DashboardPage() {
               style={{ boxShadow: "var(--yinn-soft)" }}
             >
               <span className="text-[11px] text-[var(--yinn-muted)]">Saldo</span>
+
+              {/* ✅ pakai displayBalance, bukan user.balance */}
               <span className="text-sm font-semibold">
-                {formatIDR(user.balance)}
+                {formatIDR(displayBalance)}
               </span>
+
               <Link
                 href="/topup"
                 className="grid h-7 w-7 place-items-center rounded-lg text-white"

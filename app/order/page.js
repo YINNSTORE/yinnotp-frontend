@@ -14,9 +14,10 @@ import {
   X,
   Check,
   RotateCcw,
-  ChevronRight,
   Search,
-  Loader2,
+  ChevronRight,
+  HelpCircle,
+  Bell,
 } from "lucide-react";
 import {
   ping,
@@ -29,51 +30,13 @@ import {
 } from "../_lib/rumahotpClient";
 import { activityAdd } from "../_lib/activityStore";
 
-/**
- * NOTE:
- * - Saldo RumahOTP sengaja DIHILANGKAN dari UI (sesuai request).
- * - Online + response time dibuat real-time (ping berkala).
- * - UI dibuat mirip screenshot: card "Get Virtual Number", "Pesanan Pending", "Notifikasi", "Pertanyaan Umum".
- * - Modal "Beli Nomor Virtual" berisi list aplikasi + search.
- * - Link logo aplikasi pakai mapping populer (sisanya fallback).
- */
-
-const APP_ICON = {
-  "whatsapp": "https://assets.rumahotp.com/apps/wa.png",
-  "kredito": "https://assets.rumahotp.com/apps/bdp.png",
-  "any other": "https://assets.rumahotp.com/apps/ot.png",
-  "telegram": "https://assets.rumahotp.com/apps/tg.png",
-  "grab": "https://assets.rumahotp.com/apps/jg.png",
-  "dana": "https://assets.rumahotp.com/apps/fr.png",
-  "facebook": "https://assets.rumahotp.com/apps/fb.png",
-  "google, gmail, youtube": "https://assets.rumahotp.com/apps/go.png",
-  "myxl": "https://assets.rumahotp.com/apps/bkf.png",
-  "indomaret": "https://assets.rumahotp.com/apps/ju.png",
-  "tokopedia": "https://assets.rumahotp.com/apps/xd.png",
-  "instagram": "https://assets.rumahotp.com/apps/ig.png",
-};
-
-const POPULAR_APP_NAMES = [
-  "WhatsApp",
-  "Kredito",
-  "Any Other",
-  "Telegram",
-  "Grab",
-  "DANA",
-];
-
-const FAQ_ITEMS = [
-  { title: "OTP gak masuk", desc: "Masuk", icon: "info" },
-  { title: "Cancel tapi saldo terpotong", desc: "", icon: "warn" },
-  { title: "Lupa cancel active order", desc: "", icon: "warn" },
-  { title: "Syarat refund", desc: "", icon: "doc" },
-];
-
-function formatMs(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return "—";
-  return `${Math.max(0, Math.round(v))}ms`;
-}
+/** ========= helpers ========= */
+const formatIDR = (n) =>
+  new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(n) ? n : 0);
 
 function copyText(t) {
   const s = String(t || "");
@@ -103,139 +66,208 @@ function statusLabel(v) {
 
 function isFinalStatus(v) {
   const s = String(v || "").toLowerCase();
-  return s.includes("completed") || s.includes("done") || s.includes("canceled") || s.includes("cancel");
+  return (
+    s.includes("completed") ||
+    s.includes("done") ||
+    s.includes("canceled") ||
+    s.includes("cancel")
+  );
 }
 
-function iconForServiceName(name) {
-  const k = String(name || "").trim().toLowerCase();
-  if (APP_ICON[k]) return APP_ICON[k];
-  // fallback: coba cocokkan "Google" dll dengan partial
-  if (k.includes("whatsapp")) return APP_ICON["whatsapp"];
-  if (k.includes("telegram")) return APP_ICON["telegram"];
-  if (k.includes("facebook")) return APP_ICON["facebook"];
-  if (k.includes("instagram")) return APP_ICON["instagram"];
-  if (k.includes("google")) return APP_ICON["google, gmail, youtube"];
-  return "https://assets.rumahotp.com/apps/null.png";
+function msLabel(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  return `${Math.round(n)}ms`;
 }
 
-function SoftCard({ children, className = "" }) {
+function cx(...xs) {
+  return xs.filter(Boolean).join(" ");
+}
+
+function normalizeName(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\p{L}\p{N}\s.,-]/gu, "")
+    .trim();
+}
+
+/** ========= UI bits ========= */
+function Shimmer({ className = "", style = {} }) {
   return (
     <div
-      className={`rounded-2xl border ${className}`}
-      style={{
-        background: "var(--yinn-surface)",
-        borderColor: "var(--yinn-border)",
-        boxShadow: "var(--yinn-soft)",
-      }}
+      className={cx(
+        "relative overflow-hidden rounded-xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)]",
+        className
+      )}
+      style={{ boxShadow: "var(--yinn-soft)", ...style }}
     >
-      {children}
+      <div className="h-full w-full opacity-40" />
+      <div className="yinn-shimmer absolute inset-0" />
     </div>
   );
 }
 
-function Sheet({ open, onClose, children }) {
+function Modal({ open, onClose, children, title }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose?.();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[100]">
-      <div
-        className="absolute inset-0 bg-black/40"
+    <div className="fixed inset-0 z-[80]">
+      <button
+        className="absolute inset-0 bg-black/35"
         onClick={onClose}
-        aria-label="close overlay"
+        aria-label="Tutup"
       />
-      <div
-        className="absolute left-0 right-0 bottom-0 mx-auto w-full max-w-[520px] rounded-t-3xl border p-4"
-        style={{
-          background: "var(--yinn-surface)",
-          borderColor: "var(--yinn-border)",
-          boxShadow: "0 -20px 60px rgba(0,0,0,.25)",
-        }}
-      >
-        <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-black/10" />
+      <div className="absolute bottom-0 left-0 right-0 mx-auto w-full max-w-[520px] rounded-t-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4 shadow-[0_-20px_60px_rgba(0,0,0,0.25)]">
+        <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-black/10 dark:bg-white/10" />
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-base font-extrabold">{title}</div>
+            <div className="truncate text-xs text-[var(--yinn-muted)]">
+              YinnOTP
+            </div>
+          </div>
+          <button
+            className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)]"
+            onClick={onClose}
+            aria-label="Tutup"
+            title="Tutup"
+          >
+            <X size={18} />
+          </button>
+        </div>
         {children}
       </div>
     </div>
   );
 }
 
+/** ========= constants (popular + FAQ) ========= */
+const POPULAR_APPS = [
+  { name: "WhatsApp", img: "https://assets.rumahotp.com/apps/wa.png" },
+  { name: "Kredito", img: "https://assets.rumahotp.com/apps/bdp.png" },
+  { name: "Any Other", img: "https://assets.rumahotp.com/apps/ot.png" },
+  { name: "Telegram", img: "https://assets.rumahotp.com/apps/tg.png" },
+  { name: "Grab", img: "https://assets.rumahotp.com/apps/jg.png" },
+  { name: "DANA", img: "https://assets.rumahotp.com/apps/fr.png" },
+];
+
+const FAQS = [
+  {
+    q: "OTP gak masuk-masuk",
+    a: "Tunggu sampai beberapa menit. Kalau tetap kosong, coba tombol Resend. Kalau masih gagal, Cancel lalu buat pesanan baru (stok/route operator bisa berubah).",
+  },
+  {
+    q: "Cancel tapi saldo kepotong",
+    a: "Biasanya refund mengikuti status order di provider. Pastikan status sudah 'canceled' / 'cancel'. Kalau sudah tapi saldo belum balik, tunggu beberapa menit lalu cek lagi.",
+  },
+  {
+    q: "Lupa cancel active order",
+    a: "Kalau order masih 'waiting' kamu bisa Cancel kapan saja. Kalau sudah menerima OTP dan selesai dipakai, tekan Done biar status beres.",
+  },
+  {
+    q: "Syarat refund",
+    a: "Umumnya order yang belum menerima OTP dan dibatalkan sebelum expired bisa refund (tergantung aturan provider). Order yang sudah 'received' biasanya tidak refundable.",
+  },
+];
+
+/** ========= page ========= */
 export default function OrderPage() {
-  // online + response time
+  /** server status */
   const [online, setOnline] = useState(false);
   const [checking, setChecking] = useState(false);
   const [latencyMs, setLatencyMs] = useState(null);
+  const [lastPingTs, setLastPingTs] = useState(0);
+  const [liveAgo, setLiveAgo] = useState(0);
 
-  // rumahotp data
+  /** modal state */
+  const [openBuy, setOpenBuy] = useState(false);
+  const [step, setStep] = useState(1); // 1 app, 2 country/provider/operator
+
+  /** services */
   const [services, setServices] = useState([]);
-  const [serviceId, setServiceId] = useState("");
   const [loadingServices, setLoadingServices] = useState(false);
+  const [q, setQ] = useState("");
 
+  const [serviceId, setServiceId] = useState("");
+  const pickedService = useMemo(() => {
+    const s = services.find((x) => String(x?.service_code) === String(serviceId));
+    return s || null;
+  }, [services, serviceId]);
+
+  /** countries/providers/operators */
   const [countries, setCountries] = useState([]);
-  const [countryId, setCountryId] = useState("");
-  const [providerId, setProviderId] = useState("");
   const [loadingCountries, setLoadingCountries] = useState(false);
 
+  const [countryId, setCountryId] = useState("");
+  const pickedCountry = useMemo(() => {
+    const c = countries.find((x) => String(x?.number_id) === String(countryId));
+    return c || null;
+  }, [countries, countryId]);
+
+  const [providerId, setProviderId] = useState("");
+  const pickedProvider = useMemo(() => {
+    const p = (pickedCountry?.pricelist || []).find(
+      (x) => String(x?.provider_id) === String(providerId)
+    );
+    return p || null;
+  }, [pickedCountry, providerId]);
+
+  const displayPrice = useMemo(() => {
+    const p = pickedProvider?.price;
+    return Number.isFinite(Number(p)) ? Number(p) : 0;
+  }, [pickedProvider]);
+
   const [operators, setOperators] = useState([]);
-  const [operatorId, setOperatorId] = useState("");
   const [loadingOperators, setLoadingOperators] = useState(false);
+  const [operatorId, setOperatorId] = useState("");
 
+  /** order + polling */
   const [ordering, setOrdering] = useState(false);
-
   const [activeOrder, setActiveOrder] = useState(null);
   const [polling, setPolling] = useState(false);
   const pollRef = useRef(null);
 
-  // modal aplikasi
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [appQuery, setAppQuery] = useState("");
+  /** faq ui */
+  const [openFaq, setOpenFaq] = useState(null);
 
-  const pickedService = useMemo(() => {
-    return services.find((x) => String(x?.service_code) === String(serviceId)) || null;
-  }, [services, serviceId]);
-
-  const pickedCountry = useMemo(() => {
-    return countries.find((x) => String(x?.number_id) === String(countryId)) || null;
-  }, [countries, countryId]);
-
-  const pickedProvider = useMemo(() => {
-    return (pickedCountry?.pricelist || []).find((x) => String(x?.provider_id) === String(providerId)) || null;
-  }, [pickedCountry, providerId]);
-
-  const allServicesFiltered = useMemo(() => {
-    const q = String(appQuery || "").trim().toLowerCase();
-    const list = Array.isArray(services) ? services : [];
-    if (!q) return list;
-    return list.filter((s) => String(s?.service_name || "").toLowerCase().includes(q));
-  }, [services, appQuery]);
-
-  const popularServices = useMemo(() => {
-    const map = new Map();
-    for (const s of services) {
-      const n = String(s?.service_name || "");
-      map.set(n.toLowerCase(), s);
-    }
-    const out = [];
-    for (const want of POPULAR_APP_NAMES) {
-      const hit = map.get(want.toLowerCase());
-      if (hit) out.push(hit);
-    }
-    return out;
-  }, [services]);
-
+  /** ========= ping (real-time ms) ========= */
   async function refreshPing() {
     setChecking(true);
-    const t0 = Date.now();
+    const t0 = performance.now();
     try {
       const r = await ping();
-      const ok = !!(r?.json?.ok);
-      setOnline(ok);
-      setLatencyMs(Date.now() - t0);
+      const t1 = performance.now();
+      setLatencyMs(t1 - t0);
+      setLastPingTs(Date.now());
+      setOnline(!!(r?.json?.ok));
     } catch {
-      setOnline(false);
       setLatencyMs(null);
+      setLastPingTs(Date.now());
+      setOnline(false);
     } finally {
       setChecking(false);
     }
   }
 
+  /** live "ago" ticker without refresh */
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!lastPingTs) return;
+      setLiveAgo(Math.max(0, Math.floor((Date.now() - lastPingTs) / 1000)));
+    }, 250);
+    return () => clearInterval(id);
+  }, [lastPingTs]);
+
+  /** ========= data loaders ========= */
   async function loadServices() {
     setLoadingServices(true);
     try {
@@ -246,12 +278,6 @@ export default function OrderPage() {
       }
       const list = Array.isArray(r.json?.data) ? r.json.data : [];
       setServices(list);
-
-      // default service: WhatsApp kalau ada, kalau tidak pakai item pertama
-      if (!serviceId) {
-        const wa = list.find((x) => String(x?.service_name || "").toLowerCase() === "whatsapp");
-        setServiceId(String((wa || list?.[0])?.service_code || ""));
-      }
     } catch {
       toast.error("Server error");
     } finally {
@@ -270,14 +296,16 @@ export default function OrderPage() {
       const list = Array.isArray(r.json?.data) ? r.json.data : [];
       setCountries(list);
 
-      // reset selection
-      const firstCountry = list?.[0] || null;
-      const firstProvider = firstCountry?.pricelist?.[0] || null;
+      // default pick
+      const firstCountryId = list?.[0]?.number_id ? String(list[0].number_id) : "";
+      const firstProviderId = list?.[0]?.pricelist?.[0]?.provider_id
+        ? String(list[0].pricelist[0].provider_id)
+        : "";
 
-      setCountryId(firstCountry?.number_id ? String(firstCountry.number_id) : "");
-      setProviderId(firstProvider?.provider_id ? String(firstProvider.provider_id) : "");
-      setOperatorId("");
+      setCountryId(firstCountryId);
+      setProviderId(firstProviderId);
       setOperators([]);
+      setOperatorId("");
     } catch {
       toast.error("Server error");
     } finally {
@@ -303,6 +331,7 @@ export default function OrderPage() {
     }
   }
 
+  /** ========= polling ========= */
   function stopPolling() {
     setPolling(false);
     if (pollRef.current) {
@@ -323,7 +352,9 @@ export default function OrderPage() {
 
     const first = await pollOnce(order_id);
     if (first) {
-      setActiveOrder((o) => (o ? { ...o, status: first.status, otp_code: first.otp_code } : o));
+      setActiveOrder((o) =>
+        o ? { ...o, status: first.status, otp_code: first.otp_code } : o
+      );
       activityAdd({
         type: "order_status",
         order_id,
@@ -341,7 +372,10 @@ export default function OrderPage() {
       const data = await pollOnce(order_id);
       if (!data) return;
 
-      setActiveOrder((o) => (o ? { ...o, status: data.status, otp_code: data.otp_code } : o));
+      setActiveOrder((o) => {
+        if (!o) return o;
+        return { ...o, status: data.status, otp_code: data.otp_code };
+      });
 
       activityAdd({
         type: "order_status",
@@ -352,9 +386,10 @@ export default function OrderPage() {
       });
 
       if (isFinalStatus(data.status)) stopPolling();
-    }, 2500);
+    }, 2000);
   }
 
+  /** ========= order actions ========= */
   async function createOrder() {
     const sid = String(serviceId || "");
     const cid = String(countryId || "");
@@ -368,7 +403,6 @@ export default function OrderPage() {
 
     setOrdering(true);
     try {
-      // endpoint order v2: number_id + provider_id + operator_id
       const r = await roOrder(cid, pid, oid);
       if (!r.ok || !r.json?.success) {
         toast.error("Gagal buat order");
@@ -395,7 +429,6 @@ export default function OrderPage() {
       };
 
       setActiveOrder(row);
-
       activityAdd({
         type: "order_create",
         order_id: row.order_id,
@@ -407,7 +440,9 @@ export default function OrderPage() {
         ts: Date.now(),
       });
 
-      toast.success("Order dibuat");
+      toast.success("Pesanan dibuat");
+      setOpenBuy(false);
+      setStep(1);
       startPolling(row.order_id);
     } catch {
       toast.error("Server error");
@@ -419,6 +454,7 @@ export default function OrderPage() {
   async function setStatus(action) {
     if (!activeOrder?.order_id) return;
     const order_id = activeOrder.order_id;
+
     const r = await roStatusSet(order_id, action);
     if (!r.ok || !r.json?.success) {
       toast.error("Gagal update status");
@@ -428,39 +464,102 @@ export default function OrderPage() {
     startPolling(order_id);
   }
 
+  /** ========= modal flow ========= */
+  function openBuyModal() {
+    setOpenBuy(true);
+    setStep(1);
+    setQ("");
+  }
+
+  async function pickService(svc) {
+    const sid = String(svc?.service_code || "");
+    if (!sid) return;
+
+    setServiceId(sid);
+    setStep(2);
+
+    // load next step deps
+    await loadCountries(sid);
+  }
+
+  /** auto load operators when country/provider ready (in step 2) */
+  useEffect(() => {
+    if (!openBuy || step !== 2) return;
+    if (!pickedCountry?.name || !providerId) return;
+    loadOperators(pickedCountry.name, providerId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openBuy, step, pickedCountry?.name, providerId]);
+
+  /** ========= boot ========= */
   useEffect(() => {
     refreshPing();
     loadServices();
 
-    const t = setInterval(() => refreshPing(), 8000);
+    const tPing = setInterval(() => refreshPing(), 5000);
     return () => {
-      clearInterval(t);
+      clearInterval(tPing);
       stopPolling();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!serviceId) return;
-    loadCountries(serviceId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serviceId]);
+  /** ========= derived lists ========= */
+  const serviceByName = useMemo(() => {
+    const m = new Map();
+    for (const s of services) m.set(normalizeName(s?.service_name), s);
+    return m;
+  }, [services]);
 
-  useEffect(() => {
-    if (!pickedCountry?.name || !providerId) return;
-    loadOperators(pickedCountry.name, providerId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickedCountry?.name, providerId]);
+  const popularResolved = useMemo(() => {
+    // Use POPULAR_APPS list but resolve to actual service from API (so service_code valid)
+    return POPULAR_APPS.map((p) => {
+      const svc = serviceByName.get(normalizeName(p.name));
+      return { ...p, svc };
+    }).filter((x) => x.svc);
+  }, [serviceByName]);
 
-  const topStatusText = useMemo(() => {
-    if (checking) return "checking...";
-    return online ? "Online" : "Offline";
-  }, [checking, online]);
+  const filteredServices = useMemo(() => {
+    const qq = normalizeName(q);
+    if (!qq) return services;
+    return services.filter((s) => normalizeName(s?.service_name).includes(qq));
+  }, [services, q]);
 
+  const pickedServiceLogo = useMemo(() => {
+    // prefer API logo, else popular override if matching
+    if (pickedService?.service_img) return pickedService.service_img;
+    const hit = POPULAR_APPS.find(
+      (p) => normalizeName(p.name) === normalizeName(pickedService?.service_name)
+    );
+    return hit?.img || "";
+  }, [pickedService]);
+
+  /** ========= render ========= */
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
       <Toaster position="top-right" />
 
+      <style jsx global>{`
+        .yinn-shimmer {
+          background: linear-gradient(
+            110deg,
+            rgba(255, 255, 255, 0) 0%,
+            rgba(255, 255, 255, 0.18) 35%,
+            rgba(255, 255, 255, 0) 70%
+          );
+          transform: translateX(-100%);
+          animation: yinnShimmer 1.2s ease-in-out infinite;
+        }
+        @keyframes yinnShimmer {
+          0% {
+            transform: translateX(-100%);
+          }
+          100% {
+            transform: translateX(100%);
+          }
+        }
+      `}</style>
+
+      {/* header */}
       <header className="sticky top-0 z-40 border-b border-[var(--yinn-border)] bg-[var(--yinn-surface)]">
         <div className="mx-auto flex max-w-[520px] items-center gap-3 px-4 py-3">
           <Link
@@ -474,194 +573,212 @@ export default function OrderPage() {
           </Link>
 
           <div className="min-w-0">
-            <div className="truncate text-sm font-extrabold leading-tight">Order</div>
+            <div className="truncate text-sm font-extrabold leading-tight">
+              Activity
+            </div>
             <div className="truncate text-[11px] text-[var(--yinn-muted)]">
-              {topStatusText} • {online ? `${formatMs(latencyMs)} response server saat ini` : "—"}
+              {checking ? "checking..." : online ? "online" : "offline"} •{" "}
+              {msLabel(latencyMs)} • update {liveAgo}s lalu
             </div>
           </div>
 
           <div className="ms-auto flex items-center gap-2">
-            <button
-              onClick={refreshPing}
-              className="inline-flex items-center gap-2 rounded-xl border border-[var(--yinn-border)] px-3 py-2 text-sm font-extrabold"
-              style={{ boxShadow: "var(--yinn-soft)" }}
-              title="Refresh status"
-              aria-label="Refresh status"
-            >
-              {online ? <SignalHigh size={16} /> : <SignalLow size={16} />}
-              <span>{online ? "Online" : "Offline"}</span>
-              <RefreshCw size={14} className={checking ? "animate-spin" : ""} />
-            </button>
-
             <ThemeMenu />
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-[520px] px-4 pt-4 pb-[calc(120px+env(safe-area-inset-bottom))]">
-        {/* TOP ROW CARDS: Saldo Kamu + Get Virtual Number */}
-        <div className="grid gap-3 md:grid-cols-2">
-          <SoftCard className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="grid h-10 w-10 place-items-center rounded-2xl border border-[var(--yinn-border)]">
-                <span className="text-sm font-extrabold">₿</span>
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs font-bold text-[var(--yinn-muted)]">Status</div>
-                <div className="mt-1 text-sm font-extrabold">
-                  {online ? "Online" : "Offline"}{" "}
-                  <span className="text-[var(--yinn-muted)] font-bold">
-                    • {online ? `${formatMs(latencyMs)} response` : "—"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="ms-auto">
-                <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--yinn-border)] px-3 py-2 text-xs font-extrabold">
-                  <span className={online ? "text-emerald-500" : "text-red-500"}>●</span>
-                  <span>{online ? "Online" : "Offline"}</span>
-                </div>
-              </div>
-            </div>
-          </SoftCard>
-
-          <SoftCard
-            className="p-4"
-            // gradient mirip contoh
+        {/* top cards like screenshot */}
+        <section className="grid grid-cols-2 gap-3">
+          <div
+            className="rounded-2xl border p-4"
             style={{
-              background:
-                "linear-gradient(135deg, rgba(255,141,75,.28), rgba(130,99,255,.22))",
+              background: "var(--yinn-surface)",
               borderColor: "var(--yinn-border)",
               boxShadow: "var(--yinn-soft)",
             }}
           >
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-extrabold">Get Virtual Number</div>
-                <div className="mt-1 text-xs text-[var(--yinn-muted)]">
-                  OTP access for banyak apps di banyak negara
-                </div>
-
-                <div className="mt-3 flex items-center gap-2">
-                  <div className="flex -space-x-2">
-                    {["WhatsApp", "Telegram", "Facebook", "Google"].map((n) => (
-                      <img
-                        key={n}
-                        src={iconForServiceName(n)}
-                        alt={n}
-                        className="h-7 w-7 rounded-full border border-white/60 bg-white object-contain"
-                        loading="lazy"
-                      />
-                    ))}
-                  </div>
-                  <div className="text-xs font-bold text-[var(--yinn-muted)]">+ banyak lainnya</div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setSheetOpen(true)}
-                className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-extrabold text-white"
-                style={{ background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
+            <div className="flex items-center gap-2">
+              <div
+                className={cx(
+                  "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-extrabold",
+                  online
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
+                    : "border-rose-500/30 bg-rose-500/10 text-rose-600"
+                )}
               >
-                Beli Nomor <ChevronRight size={18} />
+                {online ? <SignalHigh size={14} /> : <SignalLow size={14} />}
+                {online ? "Online" : "Offline"}
+              </div>
+              <button
+                onClick={refreshPing}
+                className="ms-auto grid h-9 w-9 place-items-center rounded-xl border border-[var(--yinn-border)]"
+                aria-label="Refresh ping"
+                title="Refresh"
+              >
+                <RefreshCw size={16} className={checking ? "animate-spin" : ""} />
               </button>
             </div>
-          </SoftCard>
-        </div>
 
-        {/* PESANAN PENDING */}
-        <SoftCard className="mt-4 p-4">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-extrabold">Pesanan Pending</div>
+            <div className="mt-3 text-sm font-extrabold">
+              {msLabel(latencyMs)} response server
+            </div>
+            <div className="mt-1 text-xs text-[var(--yinn-muted)]">
+              Real-time update otomatis tanpa refresh.
+            </div>
+
             <button
-              onClick={() => activeOrder?.order_id && startPolling(activeOrder.order_id)}
-              className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)]"
-              title="Refresh"
-              aria-label="Refresh"
+              onClick={openBuyModal}
+              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-sm font-extrabold text-white"
+              style={{
+                background:
+                  "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+              }}
             >
-              <RefreshCw size={18} className={polling ? "animate-spin" : ""} />
+              Beli Nomor
+              <ChevronRight size={18} />
             </button>
           </div>
 
-          {!activeOrder ? (
-            <div className="mt-3 grid place-items-center rounded-2xl border border-[var(--yinn-border)] p-6">
-              <div className="text-sm font-extrabold">Tidak ada pesanan</div>
-              <div className="mt-1 text-xs text-[var(--yinn-muted)]">Pesanan aktif akan muncul disini</div>
-
-              <button
-                onClick={() => setSheetOpen(true)}
-                className="mt-4 inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-extrabold text-white"
-                style={{ background: "rgba(0,0,0,.75)" }}
-              >
-                + Buat Pesanan
-              </button>
+          <div
+            className="rounded-2xl border p-4 text-white"
+            style={{
+              borderColor: "var(--yinn-border)",
+              boxShadow: "var(--yinn-soft)",
+              background:
+                "linear-gradient(135deg, rgba(255,122,0,0.95), rgba(155,81,224,0.95))",
+            }}
+          >
+            <div className="text-xs font-bold opacity-90">Get Virtual Number</div>
+            <div className="mt-1 text-sm font-extrabold">
+              OTP access untuk banyak aplikasi
             </div>
-          ) : (
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {popularResolved.slice(0, 5).map((p) => (
+                <div
+                  key={p.name}
+                  className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-extrabold"
+                >
+                  <img
+                    src={p.img}
+                    alt={p.name}
+                    className="h-4 w-4 rounded-sm"
+                    loading="lazy"
+                  />
+                  {p.name}
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={openBuyModal}
+              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white/15 py-3 text-sm font-extrabold"
+            >
+              Pilih Nomor
+              <ChevronRight size={18} />
+            </button>
+          </div>
+        </section>
+
+        {/* pending order */}
+        <section
+          className="mt-4 rounded-2xl border p-4"
+          style={{
+            background: "var(--yinn-surface)",
+            borderColor: "var(--yinn-border)",
+            boxShadow: "var(--yinn-soft)",
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-extrabold">Pesanan Pending</div>
+            <button
+              onClick={() => {
+                if (activeOrder?.order_id) startPolling(activeOrder.order_id);
+              }}
+              className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)]"
+              aria-label="Sync order"
+              title="Sync"
+            >
+              <RefreshCw size={16} className={polling ? "animate-spin" : ""} />
+            </button>
+          </div>
+
+          {activeOrder ? (
             <div className="mt-3 grid gap-3">
-              <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="flex items-center justify-between gap-3">
+              <div className="grid grid-cols-[56px_1fr] gap-3 rounded-2xl border border-[var(--yinn-border)] p-3">
+                <div className="grid h-14 w-14 place-items-center overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
+                  {pickedServiceLogo ? (
+                    <img
+                      src={pickedServiceLogo}
+                      alt={activeOrder.service}
+                      className="h-10 w-10"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <HelpCircle size={22} />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-extrabold">
+                    {activeOrder.service} • {activeOrder.country}
+                  </div>
+                  <div className="mt-1 text-xs text-[var(--yinn-muted)]">
+                    Status:{" "}
+                    <span className="font-bold">{statusLabel(activeOrder.status)}</span>{" "}
+                    • Exp {Number(activeOrder.expires_in_minute || 0)} menit •{" "}
+                    {formatIDR(activeOrder.price)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-2 rounded-2xl border border-[var(--yinn-border)] p-3">
+                <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-[var(--yinn-muted)]">Order</div>
-                    <div className="mt-1 flex items-center gap-2">
-                      <img
-                        src={iconForServiceName(activeOrder.service)}
-                        alt={activeOrder.service}
-                        className="h-8 w-8 rounded-xl border border-[var(--yinn-border)] bg-white object-contain"
-                      />
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-extrabold">{activeOrder.service}</div>
-                        <div className="truncate text-[11px] text-[var(--yinn-muted)]">
-                          {activeOrder.country} • {activeOrder.operator}
-                        </div>
-                      </div>
+                    <div className="text-[11px] font-bold text-[var(--yinn-muted)]">
+                      PHONE
+                    </div>
+                    <div className="break-all text-sm font-extrabold">
+                      {activeOrder.phone_number || "—"}
                     </div>
                   </div>
-
-                  <div className="text-right">
-                    <div className="text-xs font-bold text-[var(--yinn-muted)]">Status</div>
-                    <div className="mt-1 text-sm font-extrabold">{statusLabel(activeOrder.status)}</div>
-                  </div>
+                  <button
+                    onClick={() => {
+                      copyText(activeOrder.phone_number);
+                      toast.success("Copied");
+                    }}
+                    className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)]"
+                    title="Copy"
+                    aria-label="Copy"
+                  >
+                    <Copy size={16} />
+                  </button>
                 </div>
 
-                <div className="mt-3 grid gap-2">
-                  <div className="rounded-xl border border-[var(--yinn-border)] p-3">
-                    <div className="text-xs font-bold text-[var(--yinn-muted)]">PHONE</div>
-                    <div className="mt-1 flex items-center justify-between gap-2">
-                      <div className="text-sm font-extrabold break-all">{activeOrder.phone_number || "—"}</div>
-                      <button
-                        onClick={() => {
-                          copyText(activeOrder.phone_number);
-                          toast.success("Copied");
-                        }}
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--yinn-border)]"
-                        title="Copy"
-                        aria-label="Copy"
-                      >
-                        <Copy size={16} />
-                      </button>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-bold text-[var(--yinn-muted)]">
+                      OTP
+                    </div>
+                    <div className="break-all text-lg font-extrabold">
+                      {activeOrder.otp_code || "-"}
                     </div>
                   </div>
-
-                  <div className="rounded-xl border border-[var(--yinn-border)] p-3">
-                    <div className="text-xs font-bold text-[var(--yinn-muted)]">OTP</div>
-                    <div className="mt-1 flex items-center justify-between gap-2">
-                      <div className="text-lg font-extrabold break-all">{activeOrder.otp_code || "-"}</div>
-                      <button
-                        onClick={() => {
-                          copyText(activeOrder.otp_code);
-                          toast.success("Copied");
-                        }}
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--yinn-border)]"
-                        title="Copy"
-                        aria-label="Copy"
-                      >
-                        <Copy size={16} />
-                      </button>
-                    </div>
-                  </div>
+                  <button
+                    onClick={() => {
+                      copyText(activeOrder.otp_code);
+                      toast.success("Copied");
+                    }}
+                    className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)]"
+                    title="Copy"
+                    aria-label="Copy"
+                  >
+                    <Copy size={16} />
+                  </button>
                 </div>
 
-                <div className="mt-3 grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-3 gap-2 pt-1">
                   <button
                     onClick={() => setStatus("cancel")}
                     className="inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--yinn-border)] px-3 py-3 text-sm font-extrabold"
@@ -683,276 +800,374 @@ export default function OrderPage() {
                 </div>
               </div>
             </div>
+          ) : (
+            <div className="mt-4 grid place-items-center rounded-2xl border border-[var(--yinn-border)] p-6 text-center">
+              <div className="text-sm font-extrabold">Tidak ada pesanan</div>
+              <div className="mt-1 text-xs text-[var(--yinn-muted)]">
+                Pesanan aktif akan muncul di sini
+              </div>
+              <button
+                onClick={openBuyModal}
+                className="mt-4 inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-extrabold text-white"
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                }}
+              >
+                + Buat Pesanan
+              </button>
+            </div>
           )}
-        </SoftCard>
+        </section>
 
-        {/* NOTIFIKASI + FAQ */}
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <SoftCard className="p-4">
+        {/* notification + FAQ like screenshot */}
+        <section className="mt-4 grid grid-cols-2 gap-3">
+          <div
+            className="rounded-2xl border p-4"
+            style={{
+              background: "var(--yinn-surface)",
+              borderColor: "var(--yinn-border)",
+              boxShadow: "var(--yinn-soft)",
+            }}
+          >
             <div className="flex items-center gap-2">
+              <Bell size={18} />
               <div className="text-sm font-extrabold">Notifikasi</div>
             </div>
 
-            <div className="mt-3 flex items-center justify-between rounded-xl border border-[var(--yinn-border)] p-3">
-              <div className="text-xs">
-                <div className="font-extrabold">Tidak Aktif</div>
-                <div className="mt-0.5 text-[var(--yinn-muted)]">Browser</div>
-              </div>
-
-              <div className="flex gap-2">
-                <button className="rounded-xl border border-[var(--yinn-border)] px-4 py-2 text-sm font-extrabold">
-                  Browser
-                </button>
+            <div className="mt-3 rounded-2xl border border-[var(--yinn-border)] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-extrabold">Browser</div>
+                  <div className="text-[11px] text-[var(--yinn-muted)]">
+                    Disarankan agar OTP real-time.
+                  </div>
+                </div>
                 <button
-                  className="rounded-xl px-4 py-2 text-sm font-extrabold text-white"
-                  style={{ background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
+                  className="rounded-xl px-3 py-2 text-xs font-extrabold text-white"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                  }}
+                  onClick={() => toast("Fitur notifikasi bisa kamu sambungin nanti")}
                 >
                   Aktifkan
                 </button>
               </div>
-            </div>
 
-            <div className="mt-3 rounded-xl border border-[var(--yinn-border)] p-3">
-              <div className="text-sm font-extrabold">Message Notifikasi Real-time</div>
-              <div className="mt-1 text-xs text-[var(--yinn-muted)]">
-                Disarankan menggunakan notifikasi real-time agar SMS message dapat diterima tepat waktu tanpa delay.
+              <div className="mt-3 rounded-2xl border border-[var(--yinn-border)] bg-black/5 p-3 text-[11px] text-[var(--yinn-muted)] dark:bg-white/5">
+                Message notifikasi real-time membantu OTP masuk tepat waktu tanpa delay.
               </div>
             </div>
-          </SoftCard>
+          </div>
 
-          <SoftCard className="p-4">
-            <div className="text-sm font-extrabold">Pertanyaan Umum</div>
+          <div
+            className="rounded-2xl border p-4"
+            style={{
+              background: "var(--yinn-surface)",
+              borderColor: "var(--yinn-border)",
+              boxShadow: "var(--yinn-soft)",
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <HelpCircle size={18} />
+              <div className="text-sm font-extrabold">Pertanyaan Umum</div>
+            </div>
+            <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
+              Tips cepat biar order kamu lancar.
+            </div>
+
             <div className="mt-3 grid gap-2">
-              {FAQ_ITEMS.map((it) => (
-                <button
-                  key={it.title}
-                  className="flex items-center justify-between rounded-xl border border-[var(--yinn-border)] p-3 text-left"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-extrabold">{it.title}</div>
-                    {it.desc ? (
-                      <div className="mt-0.5 text-xs text-[var(--yinn-muted)]">{it.desc}</div>
-                    ) : null}
-                  </div>
-                  <ChevronRight size={18} className="text-[var(--yinn-muted)]" />
-                </button>
-              ))}
-            </div>
-          </SoftCard>
-        </div>
-
-        {/* ADVANCED: pilihan negara/provider/operator + Buy */}
-        <SoftCard className="mt-4 p-4">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-extrabold">Detail Pesanan</div>
-            <Link href="/dashboard/activity" className="text-sm font-semibold text-[var(--yinn-muted)]">
-              activity →
-            </Link>
-          </div>
-
-          <div className="mt-3 grid gap-3">
-            <button
-              onClick={() => setSheetOpen(true)}
-              className="flex items-center justify-between rounded-2xl border border-[var(--yinn-border)] px-3 py-3 text-left"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <img
-                  src={iconForServiceName(pickedService?.service_name)}
-                  alt={pickedService?.service_name || "App"}
-                  className="h-10 w-10 rounded-2xl border border-[var(--yinn-border)] bg-white object-contain"
-                />
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-[var(--yinn-muted)]">Aplikasi</div>
-                  <div className="truncate text-sm font-extrabold">
-                    {pickedService?.service_name || "Pilih aplikasi"}
-                  </div>
-                </div>
-              </div>
-              <ChevronRight size={18} className="text-[var(--yinn-muted)]" />
-            </button>
-
-            <div>
-              <div className="text-xs font-bold text-[var(--yinn-muted)]">Country</div>
-              <select
-                value={countryId}
-                onChange={(e) => {
-                  setCountryId(e.target.value);
-                  setProviderId("");
-                  setOperatorId("");
-                  setOperators([]);
-                }}
-                className="mt-1 w-full rounded-xl border border-[var(--yinn-border)] bg-transparent px-3 py-3 text-sm outline-none"
-                disabled={loadingCountries || !countries.length}
-              >
-                {countries.map((c) => (
-                  <option key={c.number_id} value={String(c.number_id)}>
-                    {c.name} ({c.prefix}) • stock {Number(c.stock_total || 0)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <div className="text-xs font-bold text-[var(--yinn-muted)]">Provider</div>
-                <select
-                  value={providerId}
-                  onChange={(e) => {
-                    setProviderId(e.target.value);
-                    setOperatorId("");
-                    setOperators([]);
-                  }}
-                  className="mt-1 w-full rounded-xl border border-[var(--yinn-border)] bg-transparent px-3 py-3 text-sm outline-none"
-                  disabled={!pickedCountry}
-                >
-                  {(pickedCountry?.pricelist || []).map((p) => (
-                    <option key={p.provider_id} value={String(p.provider_id)}>
-                      Rp {Number(p.price || 0).toLocaleString("id-ID")} • stock {Number(p.stock || 0)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div className="text-xs font-bold text-[var(--yinn-muted)]">Operator</div>
-                <select
-                  value={operatorId}
-                  onChange={(e) => setOperatorId(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-[var(--yinn-border)] bg-transparent px-3 py-3 text-sm outline-none"
-                  disabled={loadingOperators || !operators.length}
-                >
-                  {operators.map((o) => (
-                    <option key={o.id} value={String(o.id)}>
-                      {o.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <button
-              onClick={createOrder}
-              disabled={ordering || !online}
-              className="w-full rounded-2xl py-3 text-sm font-extrabold text-white disabled:opacity-60"
-              style={{ background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }}
-            >
-              {ordering ? "Memproses..." : online ? "Buy Number" : "Offline"}
-            </button>
-
-            <div className="text-[11px] text-[var(--yinn-muted)]">
-              * Status & OTP akan update otomatis (polling).
+              {FAQS.map((f, idx) => {
+                const open = openFaq === idx;
+                return (
+                  <button
+                    key={f.q}
+                    className="rounded-2xl border border-[var(--yinn-border)] p-3 text-left"
+                    onClick={() => setOpenFaq(open ? null : idx)}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-extrabold">{f.q}</div>
+                      <ChevronRight
+                        size={16}
+                        className={open ? "rotate-90 transition" : "transition"}
+                      />
+                    </div>
+                    <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
+                      {open ? f.a : "Ketuk untuk lihat keterangan"}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
-        </SoftCard>
+        </section>
       </main>
 
       <BottomNav />
 
-      {/* SHEET: PILIH APLIKASI */}
-      <Sheet
-        open={sheetOpen}
+      {/* BUY MODAL */}
+      <Modal
+        open={openBuy}
         onClose={() => {
-          setSheetOpen(false);
-          setAppQuery("");
+          setOpenBuy(false);
+          setStep(1);
         }}
+        title="Beli Nomor Virtual"
       >
-        <div className="flex items-start justify-between gap-3">
+        {/* search */}
+        {step === 1 && (
           <div>
-            <div className="text-base font-extrabold">Beli Nomor Virtual</div>
-            <div className="mt-1 text-xs text-[var(--yinn-muted)]">Pilih sebuah aplikasi dan negaranya</div>
-          </div>
-          <button
-            onClick={() => {
-              setSheetOpen(false);
-              setAppQuery("");
-            }}
-            className="grid h-10 w-10 place-items-center rounded-2xl border border-[var(--yinn-border)]"
-            aria-label="Close"
-            title="Close"
-          >
-            <X size={18} />
-          </button>
-        </div>
+            <div className="text-xs text-[var(--yinn-muted)]">
+              Pilih sebuah aplikasi dan lanjutkan ke negara & operator.
+            </div>
 
-        <div className="mt-4 flex items-center gap-2 rounded-2xl border border-[var(--yinn-border)] px-3 py-3">
-          <Search size={18} className="text-[var(--yinn-muted)]" />
-          <input
-            value={appQuery}
-            onChange={(e) => setAppQuery(e.target.value)}
-            placeholder="Cari nama aplikasi..."
-            className="w-full bg-transparent text-sm outline-none"
-          />
-          {loadingServices ? <Loader2 size={18} className="animate-spin text-[var(--yinn-muted)]" /> : null}
-        </div>
+            <div className="mt-3 flex items-center gap-2 rounded-2xl border border-[var(--yinn-border)] px-3 py-2">
+              <Search size={16} className="text-[var(--yinn-muted)]" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Cari nama aplikasi..."
+                className="w-full bg-transparent py-2 text-sm outline-none"
+              />
+            </div>
 
-        {/* POPULAR */}
-        <div className="mt-4">
-          <div className="text-xs font-extrabold text-[var(--yinn-muted)]">Aplikasi Populer</div>
+            <div className="mt-4 text-xs font-extrabold text-[var(--yinn-muted)]">
+              Aplikasi Populer
+            </div>
 
-          <div className="mt-2 grid grid-cols-3 gap-2">
-            {(popularServices.length ? popularServices : services.slice(0, 6)).map((s) => (
-              <button
-                key={s.service_code}
-                onClick={() => {
-                  setServiceId(String(s.service_code));
-                  setSheetOpen(false);
-                  setAppQuery("");
-                  toast.success(`Pilih ${s.service_name}`);
-                }}
-                className="rounded-2xl border border-[var(--yinn-border)] p-3 text-center"
-              >
-                <img
-                  src={iconForServiceName(s.service_name)}
-                  alt={s.service_name}
-                  className="mx-auto h-12 w-12 rounded-2xl border border-[var(--yinn-border)] bg-white object-contain"
-                  loading="lazy"
-                />
-                <div className="mt-2 truncate text-xs font-extrabold">{s.service_name}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* ALL */}
-        <div className="mt-5">
-          <div className="text-xs font-extrabold text-[var(--yinn-muted)]">Semua Aplikasi</div>
-
-          <div className="mt-2 max-h-[42vh] overflow-auto rounded-2xl border border-[var(--yinn-border)]">
-            {allServicesFiltered.length ? (
-              allServicesFiltered.map((s) => (
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {popularResolved.map((p) => (
                 <button
-                  key={s.service_code}
-                  onClick={() => {
-                    setServiceId(String(s.service_code));
-                    setSheetOpen(false);
-                    setAppQuery("");
-                    toast.success(`Pilih ${s.service_name}`);
-                  }}
-                  className="flex w-full items-center justify-between gap-3 border-b border-[var(--yinn-border)] px-3 py-3 text-left last:border-b-0"
+                  key={p.svc.service_code}
+                  onClick={() => pickService(p.svc)}
+                  className="rounded-2xl border border-[var(--yinn-border)] p-3 text-center"
                 >
-                  <div className="flex items-center gap-3 min-w-0">
+                  <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
                     <img
-                      src={iconForServiceName(s.service_name)}
-                      alt={s.service_name}
-                      className="h-10 w-10 rounded-2xl border border-[var(--yinn-border)] bg-white object-contain"
+                      src={p.img}
+                      alt={p.name}
+                      className="h-9 w-9"
                       loading="lazy"
                     />
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-extrabold">{s.service_name}</div>
-                      <div className="truncate text-[11px] text-[var(--yinn-muted)]">Tap untuk pilih</div>
-                    </div>
                   </div>
-                  <ChevronRight size={18} className="text-[var(--yinn-muted)]" />
+                  <div className="mt-2 truncate text-xs font-extrabold">
+                    {p.name}
+                  </div>
                 </button>
-              ))
-            ) : (
-              <div className="px-3 py-6 text-center text-sm text-[var(--yinn-muted)]">
-                Tidak ada hasil.
-              </div>
-            )}
+              ))}
+            </div>
+
+            <div className="mt-4 text-xs font-extrabold text-[var(--yinn-muted)]">
+              Semua Aplikasi
+            </div>
+
+            <div className="mt-2 max-h-[48vh] overflow-auto rounded-2xl border border-[var(--yinn-border)]">
+              {loadingServices ? (
+                <div className="p-3">
+                  <Shimmer className="h-12" />
+                  <div className="mt-2 grid gap-2">
+                    <Shimmer className="h-12" />
+                    <Shimmer className="h-12" />
+                    <Shimmer className="h-12" />
+                  </div>
+                </div>
+              ) : (
+                <div className="divide-y divide-[var(--yinn-border)]">
+                  {filteredServices.map((s) => (
+                    <button
+                      key={s.service_code}
+                      onClick={() => pickService(s)}
+                      className="flex w-full items-center gap-3 p-3 text-left hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
+                        <img
+                          src={s.service_img}
+                          alt={s.service_name}
+                          className="h-8 w-8"
+                          loading="lazy"
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-extrabold">
+                          {s.service_name}
+                        </div>
+                        <div className="truncate text-[11px] text-[var(--yinn-muted)]">
+                          Tap untuk pilih
+                        </div>
+                      </div>
+                      <ChevronRight size={18} className="text-[var(--yinn-muted)]" />
+                    </button>
+                  ))}
+                  {!filteredServices.length && (
+                    <div className="p-4 text-sm text-[var(--yinn-muted)]">
+                      Tidak ada aplikasi yang cocok.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      </Sheet>
+        )}
+
+        {/* step 2: choose country/provider/operator */}
+        {step === 2 && (
+          <div>
+            <div className="flex items-center gap-3 rounded-2xl border border-[var(--yinn-border)] p-3">
+              <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
+                {pickedServiceLogo ? (
+                  <img
+                    src={pickedServiceLogo}
+                    alt={pickedService?.service_name || "Service"}
+                    className="h-9 w-9"
+                    loading="lazy"
+                  />
+                ) : (
+                  <HelpCircle size={22} />
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-extrabold">
+                  {pickedService?.service_name || "—"}
+                </div>
+                <div className="truncate text-[11px] text-[var(--yinn-muted)]">
+                  Pilih negara, provider & operator
+                </div>
+              </div>
+              <button
+                onClick={() => setStep(1)}
+                className="ms-auto rounded-xl border border-[var(--yinn-border)] px-3 py-2 text-xs font-extrabold"
+              >
+                Ganti
+              </button>
+            </div>
+
+            <div className="mt-3 grid gap-3">
+              {/* country */}
+              <div>
+                <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                  Negara
+                </div>
+                {loadingCountries ? (
+                  <Shimmer className="mt-1 h-12" />
+                ) : (
+                  <select
+                    value={countryId}
+                    onChange={(e) => {
+                      setCountryId(e.target.value);
+                      setProviderId("");
+                      setOperatorId("");
+                      setOperators([]);
+                      // set provider default after pickedCountry updated by effect below
+                    }}
+                    className="mt-1 w-full rounded-2xl border border-[var(--yinn-border)] bg-transparent px-3 py-3 text-sm outline-none"
+                  >
+                    {countries.map((c) => (
+                      <option key={c.number_id} value={String(c.number_id)}>
+                        {c.name} ({c.prefix}) • stock {Number(c.stock_total || 0)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* provider + operator */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                    Provider
+                  </div>
+                  {loadingCountries ? (
+                    <Shimmer className="mt-1 h-12" />
+                  ) : (
+                    <select
+                      value={providerId}
+                      onChange={(e) => {
+                        setProviderId(e.target.value);
+                        setOperatorId("");
+                        setOperators([]);
+                      }}
+                      className="mt-1 w-full rounded-2xl border border-[var(--yinn-border)] bg-transparent px-3 py-3 text-sm outline-none"
+                      disabled={!pickedCountry}
+                    >
+                      {(pickedCountry?.pricelist || []).map((p) => (
+                        <option key={p.provider_id} value={String(p.provider_id)}>
+                          Rp {Number(p.price || 0).toLocaleString("id-ID")} • stock{" "}
+                          {Number(p.stock || 0)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <div>
+                  <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                    Operator
+                  </div>
+                  {loadingOperators ? (
+                    <Shimmer className="mt-1 h-12" />
+                  ) : (
+                    <select
+                      value={operatorId}
+                      onChange={(e) => setOperatorId(e.target.value)}
+                      className="mt-1 w-full rounded-2xl border border-[var(--yinn-border)] bg-transparent px-3 py-3 text-sm outline-none"
+                      disabled={!operators.length}
+                    >
+                      {operators.map((o) => (
+                        <option key={o.id} value={String(o.id)}>
+                          {o.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              {/* summary */}
+              <div className="flex items-center justify-between rounded-2xl border border-[var(--yinn-border)] px-3 py-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                    Ringkasan
+                  </div>
+                  <div className="mt-1 truncate text-sm font-extrabold">
+                    {(pickedService?.service_name || "—") +
+                      " • " +
+                      (pickedCountry?.name || "—")}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                    Harga
+                  </div>
+                  <div className="mt-1 text-sm font-extrabold">
+                    {formatIDR(displayPrice)}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={createOrder}
+                disabled={
+                  ordering ||
+                  loadingCountries ||
+                  loadingOperators ||
+                  !serviceId ||
+                  !countryId ||
+                  !providerId ||
+                  !operatorId
+                }
+                className="w-full rounded-2xl py-3 text-sm font-extrabold text-white disabled:opacity-60"
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                }}
+              >
+                {ordering ? "Memproses..." : "Buy Number"}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

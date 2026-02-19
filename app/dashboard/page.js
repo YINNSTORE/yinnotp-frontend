@@ -14,8 +14,6 @@ import {
   Smartphone,
   Sparkles,
 } from "lucide-react";
-
-// ✅ ADD
 import { useAnimatedBalance } from "../_lib/balanceClient";
 
 const formatIDR = (n) =>
@@ -56,13 +54,9 @@ export default function DashboardPage() {
   const [filter, setFilter] = useState("Populer");
   const [showAll, setShowAll] = useState(false);
   const [query, setQuery] = useState("");
-
-  // ❌ jangan simpan balance di state user (ini yg bikin kedip saldo akun lama)
-  // const [user, setUser] = useState({ name: "User", balance: 0 });
   const [user, setUser] = useState({ name: "User" });
 
-  // ✅ saldo animasi (0 dulu lalu naik)
-  const { displayBalance } = useAnimatedBalance({ durationMs: 650 });
+  const { displayBalance, refresh } = useAnimatedBalance({ durationMs: 650 });
 
   const banners = useMemo(
     () => [
@@ -175,20 +169,52 @@ export default function DashboardPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const storedName =
+    const readName = () =>
       localStorage.getItem("yinnotp_name") ||
       localStorage.getItem("yinnotp_username") ||
       localStorage.getItem("yinnotp_active_user") ||
+      localStorage.getItem("yinnotp_user_id") ||
       localStorage.getItem("username") ||
       localStorage.getItem("name") ||
       "User";
 
-    setUser({ name: storedName });
-  }, []);
+    setUser({ name: readName() });
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") refresh?.();
+    };
+
+    const onFocus = () => refresh?.();
+
+    const onStorage = (e) => {
+      const k = String(e?.key || "");
+      if (
+        k === "yinnotp_name" ||
+        k === "yinnotp_username" ||
+        k === "yinnotp_active_user" ||
+        k === "yinnotp_user_id" ||
+        k === "yinnotp_token" ||
+        k === "yinnotp:last_session"
+      ) {
+        setUser({ name: readName() });
+        refresh?.();
+      }
+    };
+
+    refresh?.();
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("storage", onStorage);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [refresh]);
 
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
-      {/* TOP BAR */}
       <header className="sticky top-0 z-40 border-b border-[var(--yinn-border)] bg-[var(--yinn-surface)]">
         <div className="mx-auto flex max-w-[520px] items-center gap-3 px-4 py-3">
           <div className="flex min-w-0 items-center gap-2">
@@ -219,12 +245,9 @@ export default function DashboardPage() {
               style={{ boxShadow: "var(--yinn-soft)" }}
             >
               <span className="text-[11px] text-[var(--yinn-muted)]">Saldo</span>
-
-              {/* ✅ pakai displayBalance, bukan user.balance */}
               <span className="text-sm font-semibold">
                 {formatIDR(displayBalance)}
               </span>
-
               <Link
                 href="/topup"
                 className="grid h-7 w-7 place-items-center rounded-lg text-white"
@@ -253,9 +276,7 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* CONTENT */}
       <main className="mx-auto max-w-[520px] px-4 pt-4 pb-[calc(120px+env(safe-area-inset-bottom))]">
-        {/* BANNER / SLIDER */}
         <section
           className="relative overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)]"
           style={{ boxShadow: "var(--yinn-soft)" }}
@@ -334,7 +355,6 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* QUICK CARD: OTP ONLY */}
         <section
           className="mt-4 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4"
           style={{ boxShadow: "var(--yinn-soft)" }}
@@ -377,7 +397,6 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* SEARCH */}
         <section className="mt-4">
           <div
             className="flex items-center gap-2 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-3 py-3"
@@ -393,7 +412,6 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* CHIPS */}
         <section className="mt-4">
           <div className="flex items-center gap-2 overflow-x-auto pb-2">
             {chips.map((c) => (
@@ -430,7 +448,6 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* GRID */}
         <section className="mt-2">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-extrabold">
@@ -466,7 +483,6 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          {/* trust row */}
           <div className="mt-4 grid gap-3">
             <div
               className="flex items-center gap-3 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3"

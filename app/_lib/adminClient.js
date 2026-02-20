@@ -64,3 +64,38 @@ export async function adminBanSet(username, is_banned) {
   const json = await r.json().catch(() => null);
   return { ok: r.ok, json };
 }
+
+export async function adminSettingsGet({ key = "", keys = "" } = {}) {
+  const url = new URL("/api/admin/settings/get", window.location.origin);
+  if (key) url.searchParams.set("key", key);
+  if (keys) url.searchParams.set("keys", keys);
+
+  const r = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      ...authHeader(),
+    },
+    cache: "no-store",
+  });
+
+  const json = await r.json().catch(() => null);
+  return { ok: r.ok, json };
+}
+
+export async function adminSettingsSet(payload) {
+  // payload bisa: { key, value } atau { items: {k:v}}
+  const r = await fetch("/api/admin/settings/set", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...authHeader(),
+    },
+    body: JSON.stringify(payload || {}),
+    cache: "no-store",
+  });
+
+  const json = await r.json().catch(() => null);
+  return { ok: r.ok, json };
+}

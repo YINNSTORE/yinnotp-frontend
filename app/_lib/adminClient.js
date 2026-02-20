@@ -1,101 +1,130 @@
-function getToken() {
+// _lib/adminClient.js
+"use client";
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/+$/, "") ||
+  "https://yinnhosting.serv00.net/api";
+
+function readToken() {
   if (typeof window === "undefined") return "";
-  // coba beberapa key umum biar gak ngacak sistem lama lo
-  return (
-    localStorage.getItem("token") ||
-    localStorage.getItem("yinnotp_token") ||
-    localStorage.getItem("auth_token") ||
-    ""
-  );
+  // prioritas token aktif
+  const t1 = localStorage.getItem("yinnotp_token_active");
+  if (t1) return String(t1);
+
+  const t2 = localStorage.getItem("yinnotp_token");
+  if (t2) return String(t2);
+
+  // fallback dari last_session
+  try {
+    const raw = localStorage.getItem("yinnotp:last_session");
+    if (raw) {
+      const j = JSON.parse(raw);
+      if (j?.token) return String(j.token);
+    }
+  } catch {}
+
+  return "";
 }
 
-function authHeader() {
-  const t = getToken();
-  return t ? { Authorization: `Bearer ${t}` } : {};
+async function apiFetch(path, { method = "GET", query = null, body = null } = {}) {
+  const token = readToken();
+  const url = new URL(API_BASE + (path.startsWith("/") ? path : `/${path}`));
+
+  if (query && typeof query === "object") {
+    Object.entries(query).forEach(([k, v]) => {
+      if (v === undefined || v === null) return;
+      const s = String(v).trim();
+      if (s === "") return;
+      url.searchParams.set(k, s);
+    });
+  }
+
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  // kirim dua-duanya biar aman (backend kamu support Authorization Bearer)
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+    headers["X-Token"] = token;
+  }
+
+  let resp;
+  let text = "";
+  let json = null;
+
+  try {
+    resp = await fetch(url.toString(), {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      cache: "no-store",
+    });
+
+    text = await resp.text();
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = null;
+    }
+
+    return { ok: resp.ok, status: resp.status, json, text, url: url.toString() };
+  } catch (e) {
+    return {
+      ok: false,
+      status: 0,
+      json: null,
+      text: String(e?.message || e || "Network error"),
+      url: url.toString(),
+    };
+  }
 }
 
-export async function adminUsersList({ limit = 20, offset = 0, q = "" } = {}) {
-  const url = new URL("/api/admin/users/list", window.location.origin);
-  url.searchParams.set("limit", String(limit));
-  url.searchParams.set("offset", String(offset));
-  if (q) url.searchParams.set("q", q);
+/* ================= endpoints ================= */
 
-  const r = await fetch(url.toString(), {
+export function adminUsersList({ limit = 20, offset = 0, q = "" } = {}) {
+  return apiFetch("/admin/users/list.php", {
     method: "GET",
-    headers: {
-      "Accept": "application/json",
-      ...authHeader(),
-    },
-    cache: "no-store",
+    query: { limit, offset, q },
   });
-
-  const json = await r.json().catch(() => null);
-  return { ok: r.ok, json };
 }
 
-export async function adminBalanceSet(username, balance_idr) {
-  const r = await fetch("/api/admin/users/balance-set", {
+export function adminBalanceSet(username, balanceIdr) {
+  const u = String(username || "").trim();
+  const n = Number(balanceIdr);
+
+  // kirim field yang paling mungkin dipakai backend
+  return apiFetch("/admin/users/balance_set.php", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-      ...authHeader(),
+    body: {
+      username: u,
+      balance_idr: Math.floor(Number.isFinite(n) ? n : 0),
+      balanceIdr: Math.floor(Number.isFinite(n) ? n : 0), // fallback kalau backend pake camelCase
     },
-    body: JSON.stringify({ username, balance_idr }),
-    cache: "no-store",
   });
-
-  const json = await r.json().catch(() => null);
-  return { ok: r.ok, json };
 }
 
-export async function adminBanSet(username, is_banned) {
-  const r = await fetch("/api/admin/users/ban-set", {
+export function adminBanSet(username, isBanned) {
+  const u = String(username || "").trim();
+  const b = !!isBanned;
+
+  return apiFetch("/admin/users/ban_set.php", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-      ...authHeader(),
+    body: {
+      username: u,
+      is_banned: b ? 1 : 0,
+      banned: b ? 1 : 0, // fallback
     },
-    body: JSON.stringify({ username, is_banned }),
-    cache: "no-store",
   });
-
-  const json = await r.json().catch(() => null);
-  return { ok: r.ok, json };
 }
 
-export async function adminSettingsGet({ key = "", keys = "" } = {}) {
-  const url = new URL("/api/admin/settings/get", window.location.origin);
-  if (key) url.searchParams.set("key", key);
-  if (keys) url.searchParams.set("keys", keys);
-
-  const r = await fetch(url.toString(), {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      ...authHeader(),
-    },
-    cache: "no-store",
-  });
-
-  const json = await r.json().catch(() => null);
-  return { ok: r.ok, json };
+export function adminSettingsGet() {
+  return apiFetch("/admin/settings/get.php", { method: "GET" });
 }
 
-export async function adminSettingsSet(payload) {
-  // payload bisa: { key, value } atau { items: {k:v}}
-  const r = await fetch("/api/admin/settings/set", {
+export function adminSettingsSet(key, value) {
+  return apiFetch("/admin/settings/set.php", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...authHeader(),
-    },
-    body: JSON.stringify(payload || {}),
-    cache: "no-store",
+    body: { key: String(key || ""), value: String(value ?? "") },
   });
-
-  const json = await r.json().catch(() => null);
-  return { ok: r.ok, json };
 }

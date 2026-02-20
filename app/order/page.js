@@ -17,7 +17,6 @@ import {
   Bell,
   BellOff,
 } from "lucide-react";
-import { motion } from "framer-motion";
 import {
   ping,
   roCountries,
@@ -32,6 +31,7 @@ import { activityAdd } from "../_lib/activityStore";
 /* ================= helpers ================= */
 
 const MARKUP_FLAT_IDR = 1000;
+const LS_NOTIF_KEY = "yinnotp:notif_enabled:v1";
 
 function cx(...xs) {
   return xs.filter(Boolean).join(" ");
@@ -58,12 +58,13 @@ function msLabel(ms) {
   return `${Math.round(n)}ms`;
 }
 
-function msColorClass(ms) {
+/** FIX #6: Dynamic Color Response (range) */
+function responseColorClass(ms) {
   const n = Number(ms);
   if (!Number.isFinite(n) || n <= 0) return "text-[var(--yinn-muted)]";
-  if (n <= 400) return "text-emerald-600";
-  if (n <= 600) return "text-amber-600";
-  return "text-rose-600";
+  if (n <= 400) return "text-[#22c55e]"; // hijau
+  if (n <= 600) return "text-[#eab308]"; // kuning
+  return "text-[#ef4444]"; // merah
 }
 
 function statusLabel(v) {
@@ -86,20 +87,25 @@ function isFinalStatus(v) {
   );
 }
 
+function safeNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function minPriceFromCountry(country) {
   const list = Array.isArray(country?.pricelist) ? country.pricelist : [];
-  const prices = list.map((p) => Number(p?.price || 0)).filter((x) => x > 0);
+  const prices = list.map((p) => safeNum(p?.price)).filter((x) => x > 0);
   if (!prices.length) return 0;
   return Math.min(...prices);
 }
 
-function countryStock(country) {
-  const direct = Number(country?.stock_total || 0);
-  if (Number.isFinite(direct) && direct > 0) return direct;
+function realStockFromCountry(country) {
+  const st = safeNum(country?.stock_total);
+  if (st > 0) return st;
 
   const list = Array.isArray(country?.pricelist) ? country.pricelist : [];
-  const sum = list.reduce((acc, p) => acc + (Number(p?.stock || 0) || 0), 0);
-  return sum || 0;
+  const sum = list.reduce((acc, p) => acc + safeNum(p?.stock), 0);
+  return sum > 0 ? sum : 0;
 }
 
 function applyMarkup(price) {
@@ -137,7 +143,6 @@ function flagCodeForCountry(country) {
   if (nameNorm.includes("malaysia")) return "my";
   if (nameNorm.includes("thailand")) return "th";
   if (nameNorm.includes("colombia")) return "co";
-
   return "";
 }
 
@@ -152,39 +157,75 @@ function flagUrlFromCountry(country) {
   return `https://assets.rumahotp.com/flags/${code}.png`;
 }
 
-/* ================= motion ================= */
+/* ================= FIX #2: Scroll reveal (IntersectionObserver) ================= */
 
-const revealProps = {
-  initial: { opacity: 0, scale: 0.8 },
-  whileInView: { opacity: 1, scale: 1 },
-  viewport: { once: true, amount: 0.2 },
-  transition: { duration: 0.25, ease: "easeOut" },
-};
+function Reveal({ children, className = "" }) {
+  const ref = useRef(null);
+  const [inView, setInView] = useState(false);
 
-/* ================= shimmer skeleton ================= */
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
 
-function SkeletonBox({ className = "" }) {
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            setInView(true);
+            obs.unobserve(e.target); // run once per item for perf
+          }
+        }
+      },
+      { threshold: 0.18 }
+    );
+
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      className={cx(
+        "transform-gpu will-change-transform",
+        "transition duration-300 ease-out",
+        inView ? "opacity-100 scale-100" : "opacity-0 scale-[0.8]",
+        className
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/* ================= FIX #1: Skeleton shimmer loading ================= */
+
+function SkeletonLine({ className = "" }) {
   return (
     <div
       className={cx(
-        "yinn-skel relative overflow-hidden rounded-xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5",
+        "relative overflow-hidden rounded-lg bg-black/5 dark:bg-white/5",
         className
       )}
-    />
+    >
+      <div className="yinn-shimmer absolute inset-0" />
+    </div>
   );
 }
 
 function SkeletonRowApp() {
   return (
     <div className="flex items-center gap-3 p-3">
-      <SkeletonBox className="h-10 w-10 rounded-2xl" />
-      <div className="flex-1">
-        <SkeletonBox className="h-3 w-40 rounded-lg" />
+      <div className="relative h-10 w-10 overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
+        <div className="yinn-shimmer absolute inset-0" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <SkeletonLine className="h-3 w-44" />
         <div className="mt-2">
-          <SkeletonBox className="h-3 w-28 rounded-lg" />
+          <SkeletonLine className="h-3 w-28" />
         </div>
       </div>
-      <SkeletonBox className="h-6 w-6 rounded-lg" />
+      <SkeletonLine className="h-5 w-5 rounded-md" />
     </div>
   );
 }
@@ -192,16 +233,18 @@ function SkeletonRowApp() {
 function SkeletonRowCountry() {
   return (
     <div className="flex items-center gap-3 p-3">
-      <SkeletonBox className="h-10 w-10 rounded-xl" />
-      <div className="flex-1">
-        <SkeletonBox className="h-3 w-44 rounded-lg" />
-        <div className="mt-2 flex gap-2">
-          <SkeletonBox className="h-4 w-14 rounded-full" />
-          <SkeletonBox className="h-4 w-14 rounded-full" />
-          <SkeletonBox className="h-4 w-28 rounded-full" />
+      <div className="relative h-10 w-10 overflow-hidden rounded-xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
+        <div className="yinn-shimmer absolute inset-0" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <SkeletonLine className="h-3 w-48" />
+        <div className="mt-2 flex flex-wrap gap-2">
+          <SkeletonLine className="h-4 w-14 rounded-full" />
+          <SkeletonLine className="h-4 w-14 rounded-full" />
+          <SkeletonLine className="h-4 w-28 rounded-full" />
         </div>
       </div>
-      <SkeletonBox className="h-6 w-6 rounded-lg" />
+      <SkeletonLine className="h-5 w-5 rounded-md" />
     </div>
   );
 }
@@ -210,58 +253,33 @@ function SkeletonRowProvider() {
   return (
     <div className="flex items-center gap-2 p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <SkeletonBox className="h-6 w-24 rounded-full" />
-        <SkeletonBox className="h-6 w-20 rounded-full" />
-        <SkeletonBox className="h-6 w-16 rounded-full" />
+        <SkeletonLine className="h-6 w-24 rounded-full" />
+        <SkeletonLine className="h-6 w-20 rounded-full" />
+        <SkeletonLine className="h-6 w-16 rounded-full" />
       </div>
       <div className="ms-auto flex items-center gap-2">
-        <SkeletonBox className="h-6 w-20 rounded-lg" />
-        <SkeletonBox className="h-9 w-16 rounded-xl" />
+        <SkeletonLine className="h-5 w-20" />
+        <SkeletonLine className="h-9 w-16 rounded-xl" />
       </div>
     </div>
   );
 }
 
-function PageBootOverlay({ show }) {
+function FullscreenBoot({ show }) {
   if (!show) return null;
   return (
     <div className="fixed inset-0 z-[90] bg-[var(--yinn-bg)]">
-      <div className="mx-auto max-w-[520px] px-4 pt-4">
+      <div className="mx-auto max-w-[520px] px-4 pt-5">
         <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
-          <SkeletonBox className="h-4 w-36 rounded-lg" />
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-[var(--yinn-border)] p-4">
-              <SkeletonBox className="h-6 w-24 rounded-full" />
-              <div className="mt-3">
-                <SkeletonBox className="h-4 w-40 rounded-lg" />
-              </div>
-              <div className="mt-2">
-                <SkeletonBox className="h-3 w-28 rounded-lg" />
-              </div>
-              <div className="mt-4">
-                <SkeletonBox className="h-10 w-full rounded-2xl" />
-              </div>
-            </div>
-            <div className="rounded-2xl border border-[var(--yinn-border)] p-4">
-              <SkeletonBox className="h-4 w-24 rounded-lg" />
-              <div className="mt-2">
-                <SkeletonBox className="h-4 w-40 rounded-lg" />
-              </div>
-              <div className="mt-3 flex gap-2">
-                <SkeletonBox className="h-6 w-20 rounded-full" />
-                <SkeletonBox className="h-6 w-20 rounded-full" />
-              </div>
-              <div className="mt-4">
-                <SkeletonBox className="h-10 w-full rounded-2xl" />
-              </div>
-            </div>
+          <div className="text-sm font-extrabold">Loading YinnOTP…</div>
+          <div className="mt-2 text-xs text-[var(--yinn-muted)]">
+            Mengambil layanan & status server
           </div>
-
-          <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] p-4">
-            <SkeletonBox className="h-4 w-32 rounded-lg" />
-            <div className="mt-3 grid gap-2">
-              <SkeletonBox className="h-14 w-full rounded-2xl" />
-              <SkeletonBox className="h-14 w-full rounded-2xl" />
+          <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
+            <div className="divide-y divide-[var(--yinn-border)]">
+              <SkeletonRowApp />
+              <SkeletonRowApp />
+              <SkeletonRowApp />
             </div>
           </div>
         </div>
@@ -269,8 +287,6 @@ function PageBootOverlay({ show }) {
     </div>
   );
 }
-
-/* ================= modal ================= */
 
 function Modal({ open, onClose, title, subtitle, children }) {
   useEffect(() => {
@@ -340,24 +356,25 @@ const POPULAR_APPS = [
   { name: "DANA", img: "https://assets.rumahotp.com/apps/fr.png" },
 ];
 
-/* ================= page ================= */
-
 export default function OrderPage() {
   const [bootLoading, setBootLoading] = useState(true);
 
   const [online, setOnline] = useState(false);
   const [checking, setChecking] = useState(false);
   const [latencyMs, setLatencyMs] = useState(null);
+  const [lastPingTs, setLastPingTs] = useState(0);
+  const [ago, setAgo] = useState(0);
 
+  // notifikasi realtime (Browser Notification)
+  const [notifEnabled, setNotifEnabled] = useState(false);
+  const [notifState, setNotifState] = useState("unsupported"); // unsupported | default | granted | denied
+  const lastNotifiedOtpRef = useRef("");
+
+  // modal
   const [openBuy, setOpenBuy] = useState(false);
   const [buyStep, setBuyStep] = useState("app"); // app | country
 
-  // notif
-  const [notifSupported, setNotifSupported] = useState(false);
-  const [notifPermission, setNotifPermission] = useState("default"); // default | granted | denied
-  const [notifEnabled, setNotifEnabled] = useState(false);
-
-  // services (apps)
+  // services
   const [services, setServices] = useState([]);
   const [loadingServices, setLoadingServices] = useState(false);
   const [serviceSearch, setServiceSearch] = useState("");
@@ -370,13 +387,11 @@ export default function OrderPage() {
   const [sortMode, setSortMode] = useState("rate"); // rate | harga
   const [expandedCountryId, setExpandedCountryId] = useState("");
   const [orderingKey, setOrderingKey] = useState("");
-  const [providersBootLoading, setProvidersBootLoading] = useState(false);
 
   // order status
   const [activeOrder, setActiveOrder] = useState(null);
   const [polling, setPolling] = useState(false);
   const pollRef = useRef(null);
-  const lastOtpRef = useRef("");
 
   const pickedService = useMemo(() => {
     return (
@@ -396,7 +411,9 @@ export default function OrderPage() {
   const filteredServices = useMemo(() => {
     const q = normalizeName(serviceSearch);
     if (!q) return services;
-    return services.filter((s) => normalizeName(s?.service_name).includes(q));
+    return services.filter((s) =>
+      normalizeName(s?.service_name).includes(q)
+    );
   }, [services, serviceSearch]);
 
   const filteredCountries = useMemo(() => {
@@ -405,12 +422,14 @@ export default function OrderPage() {
 
     if (sortMode === "harga") {
       list.sort(
-        (a, b) => (minPriceFromCountry(a) || 0) - (minPriceFromCountry(b) || 0)
+        (a, b) =>
+          (minPriceFromCountry(a) || 0) - (minPriceFromCountry(b) || 0)
       );
     } else {
+      // keep existing sorting feature, but avoid the "stock_total weird" pitfall in display
       list.sort((a, b) => {
-        const sa = countryStock(a);
-        const sb = countryStock(b);
+        const sa = safeNum(a?.stock_total);
+        const sb = safeNum(b?.stock_total);
         if (sb !== sa) return sb - sa;
         return (minPriceFromCountry(a) || 0) - (minPriceFromCountry(b) || 0);
       });
@@ -428,81 +447,109 @@ export default function OrderPage() {
     return hit?.img || "";
   }, [pickedService]);
 
-  function safeNotify(title, body) {
+  /* ================= FIX #4: Notification toggle (persist) ================= */
+
+  function readNotifPref() {
     try {
-      if (!notifEnabled) return;
-      if (!notifSupported) return;
-      if (notifPermission !== "granted") return;
-      new Notification(title, { body });
-    } catch {
-      // ignore
-    }
+      const v = localStorage.getItem(LS_NOTIF_KEY);
+      if (v === "1") return true;
+      if (v === "0") return false;
+    } catch {}
+    return false;
   }
 
-  async function checkNotifStatus(showToast = true) {
-    const supported = typeof window !== "undefined" && "Notification" in window;
-    setNotifSupported(supported);
+  function saveNotifPref(v) {
+    try {
+      localStorage.setItem(LS_NOTIF_KEY, v ? "1" : "0");
+    } catch {}
+  }
 
-    if (!supported) {
-      setNotifPermission("denied");
+  function updateNotifStateFromBrowser() {
+    if (typeof window === "undefined") return;
+    if (!("Notification" in window)) {
+      setNotifState("unsupported");
       setNotifEnabled(false);
-      if (showToast) toast.error("Browser tidak support notifikasi.");
+      saveNotifPref(false);
       return;
     }
+    const p = Notification.permission;
+    setNotifState(p);
 
-    const perm = Notification.permission;
-    setNotifPermission(perm);
+    const pref = readNotifPref();
+    const enabled = p === "granted" && pref;
+    setNotifEnabled(enabled);
+  }
 
-    if (perm !== "granted") {
-      setNotifEnabled(false);
-      if (showToast) toast("Notifikasi belum diizinkan.");
-      return;
+  async function requestNotificationPermission() {
+    if (typeof window === "undefined") return false;
+    if (!("Notification" in window)) return false;
+    try {
+      const p = await Notification.requestPermission();
+      setNotifState(p);
+      return p === "granted";
+    } catch {
+      return false;
     }
-
-    if (showToast) toast.success("Notifikasi siap digunakan.");
   }
 
   async function toggleNotif() {
-    const supported = typeof window !== "undefined" && "Notification" in window;
-    if (!supported) {
-      toast.error("Browser tidak support notifikasi.");
-      return;
-    }
+    if (typeof window === "undefined") return;
 
-    const perm = Notification.permission;
-    setNotifPermission(perm);
-
-    if (perm === "denied") {
-      toast.error("Notifikasi diblokir. Aktifkan dari setting browser.");
+    if (!("Notification" in window)) {
+      setNotifState("unsupported");
       setNotifEnabled(false);
+      saveNotifPref(false);
+      toast.error("Browser tidak support notifikasi");
       return;
     }
 
-    if (perm === "default") {
-      try {
-        const res = await Notification.requestPermission();
-        setNotifPermission(res);
-        if (res === "granted") {
-          setNotifEnabled(true);
-          toast.success("Notifikasi diaktifkan.");
-          safeNotify("YinnOTP", "Notifikasi aktif.");
-        } else {
-          setNotifEnabled(false);
-          toast("Notifikasi tidak diizinkan.");
-        }
-      } catch {
-        setNotifEnabled(false);
-        toast.error("Gagal minta izin notifikasi.");
-      }
+    const currentPerm = Notification.permission;
+    setNotifState(currentPerm);
+
+    // turning OFF is always allowed
+    if (notifEnabled) {
+      setNotifEnabled(false);
+      saveNotifPref(false);
+      toast("Notifikasi OFF");
       return;
     }
 
-    if (perm === "granted") {
-      setNotifEnabled((v) => {
-        const next = !v;
-        toast(next ? "Notifikasi ON" : "Notifikasi OFF");
-        return next;
+    // turning ON: need permission granted
+    if (currentPerm === "denied") {
+      toast.error("Notifikasi diblokir. Aktifkan di setting browser.");
+      setNotifEnabled(false);
+      saveNotifPref(false);
+      return;
+    }
+
+    const ok = currentPerm === "granted" ? true : await requestNotificationPermission();
+    if (!ok) {
+      toast.error("Notifikasi tidak diizinkan");
+      setNotifEnabled(false);
+      saveNotifPref(false);
+      return;
+    }
+
+    setNotifEnabled(true);
+    saveNotifPref(true);
+    toast.success("Notifikasi ON");
+  }
+
+  function fireOtpNotification(otp, phone) {
+    if (!notifEnabled) return;
+    if (!otp || otp === "-" || otp === "—") return;
+
+    const key = `${phone || ""}:${otp}`;
+    if (lastNotifiedOtpRef.current === key) return;
+    lastNotifiedOtpRef.current = key;
+
+    try {
+      new Notification("YinnOTP • OTP Masuk", {
+        body: phone ? `Nomor: ${phone}\nOTP: ${otp}` : `OTP: ${otp}`,
+        silent: false,
       });
+    } catch {
+      // ignore
     }
   }
 
@@ -513,9 +560,11 @@ export default function OrderPage() {
       const r = await ping();
       const t1 = performance.now();
       setLatencyMs(t1 - t0);
+      setLastPingTs(Date.now());
       setOnline(!!r?.json?.ok);
     } catch {
       setLatencyMs(null);
+      setLastPingTs(Date.now());
       setOnline(false);
     } finally {
       setChecking(false);
@@ -543,7 +592,6 @@ export default function OrderPage() {
 
   async function loadCountriesForService(sid) {
     setLoadingCountries(true);
-    setProvidersBootLoading(true);
     try {
       const r = await roCountries(sid);
       if (!r.ok || !r.json?.success) {
@@ -561,7 +609,6 @@ export default function OrderPage() {
       setExpandedCountryId("");
     } finally {
       setLoadingCountries(false);
-      setProvidersBootLoading(false);
     }
   }
 
@@ -597,10 +644,8 @@ export default function OrderPage() {
         ts: Date.now(),
       });
 
-      const otp = String(first.otp_code || "");
-      if (otp && otp !== "-" && otp !== lastOtpRef.current) {
-        lastOtpRef.current = otp;
-        safeNotify("OTP Masuk", `Kode OTP: ${otp}`);
+      if (String(first.otp_code || "").trim()) {
+        fireOtpNotification(first.otp_code, activeOrder?.phone_number);
       }
 
       if (isFinalStatus(first.status)) {
@@ -615,7 +660,12 @@ export default function OrderPage() {
 
       setActiveOrder((o) => {
         if (!o) return o;
-        return { ...o, status: data.status, otp_code: data.otp_code };
+        const next = { ...o, status: data.status, otp_code: data.otp_code };
+
+        if (String(data?.otp_code || "").trim()) {
+          fireOtpNotification(data.otp_code, next.phone_number);
+        }
+        return next;
       });
 
       activityAdd({
@@ -626,14 +676,8 @@ export default function OrderPage() {
         ts: Date.now(),
       });
 
-      const otp = String(data.otp_code || "");
-      if (otp && otp !== "-" && otp !== lastOtpRef.current) {
-        lastOtpRef.current = otp;
-        safeNotify("OTP Masuk", `Kode OTP: ${otp}`);
-      }
-
       if (isFinalStatus(data.status)) stopPolling();
-    }, 2000);
+    }, 1800);
   }
 
   async function setStatus(action) {
@@ -665,7 +709,7 @@ export default function OrderPage() {
     try {
       const opRes = await roOperators(countryName, pid);
       if (!opRes.ok || !opRes.json?.status) {
-        toast.error("Gagal load provider/operator");
+        toast.error("Gagal load operator");
         return;
       }
 
@@ -688,7 +732,7 @@ export default function OrderPage() {
         return;
       }
 
-      const basePrice = Number(data.price || provider?.price || 0) || 0;
+      const basePrice = safeNum(data.price || provider?.price);
       const sellPrice = applyMarkup(basePrice);
 
       const row = {
@@ -749,60 +793,86 @@ export default function OrderPage() {
   /* ================= effects ================= */
 
   useEffect(() => {
+    let alive = true;
+
+    // init notif pref
+    try {
+      const pref = readNotifPref();
+      setNotifEnabled(pref);
+    } catch {}
+
+    updateNotifStateFromBrowser();
+
     (async () => {
-      await Promise.all([refreshPing(), loadServices()]);
-      await checkNotifStatus(false);
+      setBootLoading(true);
+      await Promise.allSettled([refreshPing(), loadServices()]);
+      if (!alive) return;
+      // re-evaluate notif enabled after permission read
+      updateNotifStateFromBrowser();
       setBootLoading(false);
     })();
 
     const t = setInterval(() => refreshPing(), 5000);
     return () => {
+      alive = false;
       clearInterval(t);
       stopPolling();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!lastPingTs) return;
+      setAgo(Math.max(0, Math.floor((Date.now() - lastPingTs) / 1000)));
+    }, 250);
+    return () => clearInterval(id);
+  }, [lastPingTs]);
+
+  useEffect(() => {
+    if (activeOrder?.order_id) startPolling(activeOrder.order_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeOrder?.order_id]);
+
   /* ================= render ================= */
 
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
       <Toaster position="top-right" />
+      <FullscreenBoot show={bootLoading} />
 
       <style jsx global>{`
-        html {
+        html,
+        body {
           scroll-behavior: smooth;
         }
-        .yinn-skel {
-          position: relative;
+        * {
+          -webkit-tap-highlight-color: transparent;
         }
-        .yinn-skel:before {
-          content: "";
-          position: absolute;
-          inset: 0;
-          transform: translateX(-120%);
+        /* FIX #1: Skeleton shimmer putih mengkilap */
+        .yinn-shimmer {
           background: linear-gradient(
             90deg,
             rgba(255, 255, 255, 0) 0%,
-            rgba(255, 255, 255, 0.16) 25%,
-            rgba(255, 255, 255, 0.28) 50%,
-            rgba(255, 255, 255, 0.16) 75%,
+            rgba(255, 255, 255, 0.10) 30%,
+            rgba(255, 255, 255, 0.26) 50%,
+            rgba(255, 255, 255, 0.10) 70%,
             rgba(255, 255, 255, 0) 100%
           );
-          animation: yinnSkel 1.1s ease-out infinite;
-          mix-blend-mode: overlay;
+          transform: translateX(-130%);
+          animation: yinnShimmerMove 1.05s ease-in-out infinite;
+          filter: blur(0.25px);
+          opacity: 0.95;
         }
-        @keyframes yinnSkel {
+        @keyframes yinnShimmerMove {
           0% {
-            transform: translateX(-120%);
+            transform: translateX(-130%);
           }
           100% {
-            transform: translateX(120%);
+            transform: translateX(130%);
           }
         }
       `}</style>
-
-      <PageBootOverlay show={bootLoading} />
 
       <header className="sticky top-0 z-40 border-b border-[var(--yinn-border)] bg-[var(--yinn-surface)]">
         <div className="mx-auto flex max-w-[520px] items-center gap-3 px-4 py-3">
@@ -821,7 +891,11 @@ export default function OrderPage() {
               Order
             </div>
             <div className="truncate text-[11px] text-[var(--yinn-muted)]">
-              {checking ? "checking..." : online ? "online" : "offline"}
+              {checking ? "checking..." : online ? "online" : "offline"} •{" "}
+              <span className={cx("font-extrabold", responseColorClass(latencyMs))}>
+                {msLabel(latencyMs)}
+              </span>{" "}
+              • update {ago}s lalu
             </div>
           </div>
 
@@ -855,68 +929,50 @@ export default function OrderPage() {
                   "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-extrabold",
                   online
                     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
-                    : "border-rose-500/30 bg-rose-500/10 text-rose-600"
+                    : "border-zinc-500/30 bg-zinc-500/10 text-zinc-600"
                 )}
               >
                 {online ? <SignalHigh size={14} /> : <SignalLow size={14} />}
                 {online ? "Online" : "Offline"}
               </div>
-            </div>
 
-            <div className="mt-3 text-xs font-bold text-[var(--yinn-muted)]">
-              Respons server api
-            </div>
-
-            <div className={cx("mt-1 text-sm font-extrabold", msColorClass(latencyMs))}>
-              {msLabel(latencyMs)}
-            </div>
-
-            <div className="mt-3 flex items-center justify-between rounded-2xl border border-[var(--yinn-border)] px-3 py-2">
-              <div className="min-w-0">
-                <div className="text-xs font-extrabold">Notifikasi</div>
-                <div className="text-[11px] text-[var(--yinn-muted)]">
-                  {notifPermission === "denied"
-                    ? "Diblokir browser"
-                    : notifEnabled
-                    ? "ON"
-                    : "OFF"}
-                </div>
-              </div>
-
+              {/* FIX #4: Toggle notif ON/OFF (persist) */}
               <button
                 onClick={toggleNotif}
                 className={cx(
-                  "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-extrabold",
+                  "ms-auto inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-extrabold",
                   notifEnabled
                     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
-                    : "border-[var(--yinn-border)] text-[var(--yinn-muted)]"
+                    : "border-zinc-500/30 bg-zinc-500/10 text-zinc-600",
+                  notifState === "unsupported" ? "opacity-60" : ""
                 )}
-                aria-label="Toggle notifikasi"
                 title="Toggle notifikasi"
+                aria-label="Toggle notifikasi"
+                disabled={notifState === "unsupported"}
               >
-                {notifEnabled ? <Bell size={16} /> : <BellOff size={16} />}
-                {notifEnabled ? "ON" : "OFF"}
+                {notifEnabled ? <Bell size={14} /> : <BellOff size={14} />}
+                {notifEnabled ? "Notif ON" : "Notif OFF"}
               </button>
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button
-                onClick={() => checkNotifStatus(true)}
-                className="rounded-xl border border-[var(--yinn-border)] py-2 text-sm font-extrabold"
-              >
-                Cek
-              </button>
-              <button
-                onClick={openBuyModal}
-                className="rounded-xl py-2 text-sm font-extrabold text-white"
-                style={{
-                  background:
-                    "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
-                }}
-              >
-                + Order
-              </button>
+            <div className="mt-3 text-sm font-extrabold">
+              <span className={responseColorClass(latencyMs)}>{msLabel(latencyMs)}</span>{" "}
+              response server
             </div>
+
+            {/* FIX #5: remove "Auto update tanpa refresh." => deleted */}
+
+            <button
+              onClick={openBuyModal}
+              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-sm font-extrabold text-white"
+              style={{
+                background:
+                  "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+              }}
+            >
+              + Buat Pesanan
+              <ChevronRight size={18} />
+            </button>
           </div>
 
           <div
@@ -929,7 +985,9 @@ export default function OrderPage() {
             }}
           >
             <div className="text-xs font-bold opacity-90">Get Virtual Number</div>
-            <div className="mt-1 text-sm font-extrabold">OTP untuk banyak aplikasi</div>
+            <div className="mt-1 text-sm font-extrabold">
+              OTP untuk banyak aplikasi
+            </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {popularResolved.slice(0, 5).map((p) => (
@@ -958,6 +1016,7 @@ export default function OrderPage() {
           </div>
         </section>
 
+        {/* pending order */}
         <section
           className="mt-4 rounded-2xl border p-4"
           style={{
@@ -969,7 +1028,9 @@ export default function OrderPage() {
           <div className="flex items-center justify-between">
             <div className="text-sm font-extrabold">Pesanan Pending</div>
             <button
-              onClick={() => activeOrder?.order_id && startPolling(activeOrder.order_id)}
+              onClick={() =>
+                activeOrder?.order_id && startPolling(activeOrder.order_id)
+              }
               className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)]"
               aria-label="Sync order"
               title="Sync"
@@ -981,18 +1042,30 @@ export default function OrderPage() {
           {activeOrder ? (
             <div className="mt-3 grid gap-3">
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="text-xs font-bold text-[var(--yinn-muted)]">STATUS</div>
-                <div className="mt-1 text-sm font-extrabold">{statusLabel(activeOrder.status)}</div>
+                <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                  STATUS
+                </div>
+                <div className="mt-1 text-sm font-extrabold">
+                  {statusLabel(activeOrder.status)}
+                </div>
               </div>
 
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="text-xs font-bold text-[var(--yinn-muted)]">PHONE</div>
-                <div className="mt-1 text-sm font-extrabold break-all">{activeOrder.phone_number || "—"}</div>
+                <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                  PHONE
+                </div>
+                <div className="mt-1 text-sm font-extrabold break-all">
+                  {activeOrder.phone_number || "—"}
+                </div>
               </div>
 
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="text-xs font-bold text-[var(--yinn-muted)]">OTP</div>
-                <div className="mt-1 text-lg font-extrabold break-all">{activeOrder.otp_code || "-"}</div>
+                <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                  OTP
+                </div>
+                <div className="mt-1 text-lg font-extrabold break-all">
+                  {activeOrder.otp_code || "-"}
+                </div>
               </div>
 
               <div className="grid grid-cols-3 gap-2">
@@ -1019,7 +1092,9 @@ export default function OrderPage() {
           ) : (
             <div className="mt-4 grid place-items-center rounded-2xl border border-[var(--yinn-border)] p-6 text-center">
               <div className="text-sm font-extrabold">Tidak ada pesanan</div>
-              <div className="mt-1 text-xs text-[var(--yinn-muted)]">Pesanan aktif akan muncul di sini</div>
+              <div className="mt-1 text-xs text-[var(--yinn-muted)]">
+                Pesanan aktif akan muncul di sini
+              </div>
               <button
                 onClick={openBuyModal}
                 className="mt-4 inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-extrabold text-white"
@@ -1033,19 +1108,119 @@ export default function OrderPage() {
             </div>
           )}
         </section>
+
+        {/* bottom cards: Notifikasi + Pertanyaan Umum */}
+        <section className="mt-4 grid grid-cols-2 gap-3">
+          <div
+            className="rounded-2xl border p-4"
+            style={{
+              background: "var(--yinn-surface)",
+              borderColor: "var(--yinn-border)",
+              boxShadow: "var(--yinn-soft)",
+            }}
+          >
+            <div className="text-sm font-extrabold">Notifikasi</div>
+            <div className="mt-1 text-xs text-[var(--yinn-muted)]">
+              Aktifkan agar OTP masuk langsung muncul (real-time).
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <div
+                className={cx(
+                  "rounded-full border px-3 py-1 text-xs font-extrabold",
+                  notifEnabled
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
+                    : "border-zinc-500/30 bg-zinc-500/10 text-zinc-600"
+                )}
+              >
+                {notifEnabled ? "Aktif" : "Tidak Aktif"}
+              </div>
+              <div className="rounded-full border border-[var(--yinn-border)] px-3 py-1 text-xs font-extrabold text-[var(--yinn-muted)]">
+                Browser
+              </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {/* FIX #3: tombol Cek clickable & benar */}
+              <button
+                className="rounded-xl border border-[var(--yinn-border)] py-2 text-sm font-extrabold"
+                onClick={() => {
+                  updateNotifStateFromBrowser();
+                  if (notifState === "unsupported") toast.error("Browser tidak support notifikasi");
+                  else toast.success(`Status: ${Notification?.permission || notifState}`);
+                }}
+              >
+                Cek
+              </button>
+              <button
+                className="rounded-xl py-2 text-sm font-extrabold text-white disabled:opacity-60"
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                }}
+                onClick={toggleNotif}
+                disabled={notifState === "unsupported"}
+              >
+                {notifEnabled ? "Matikan" : "Aktifkan"}
+              </button>
+            </div>
+
+            <div className="mt-3 rounded-2xl border border-[var(--yinn-border)] p-3 text-xs text-[var(--yinn-muted)]">
+              Kalau permission “Denied”, ubah izin notifikasi di setting browser.
+            </div>
+          </div>
+
+          <div
+            className="rounded-2xl border p-4"
+            style={{
+              background: "var(--yinn-surface)",
+              borderColor: "var(--yinn-border)",
+              boxShadow: "var(--yinn-soft)",
+            }}
+          >
+            <div className="text-sm font-extrabold">Pertanyaan Umum</div>
+            <div className="mt-1 text-xs text-[var(--yinn-muted)]">
+              Info singkat biar gak bingung pas order.
+            </div>
+
+            <div className="mt-3 grid gap-2">
+              <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
+                <div className="text-xs font-extrabold">OTP gak masuk</div>
+                <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
+                  Coba Resend. Kalau tetap kosong, Cancel lalu pilih provider lain.
+                </div>
+              </div>
+              <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
+                <div className="text-xs font-extrabold">Stok kecil</div>
+                <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
+                  Stok berasal dari server RumahOTP (bisa berubah tiap detik).
+                </div>
+              </div>
+              <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
+                <div className="text-xs font-extrabold">Refund</div>
+                <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
+                  Refund biasanya otomatis kalau belum ada OTP & order di-cancel.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
 
       <BottomNav />
 
+      {/* BUY MODAL */}
       <Modal
         open={openBuy}
         onClose={() => setOpenBuy(false)}
         title="Beli Nomor Virtual"
-        subtitle="Flow: pilih aplikasi → pilih negara → pilih harga"
+        subtitle="Pilih aplikasi lalu negara & harga"
       >
         <div className="mb-3 flex items-center justify-between">
           <div className="text-xs font-extrabold text-[var(--yinn-muted)]">
-            {buyStep === "app" ? "Step 1: Pilih aplikasi" : "Step 2: Pilih negara & harga"}
+            {buyStep === "app"
+              ? "Step 1: Pilih aplikasi"
+              : "Step 2: Pilih negara & harga"}
           </div>
 
           {buyStep === "country" ? (
@@ -1076,42 +1251,30 @@ export default function OrderPage() {
               />
             </div>
 
-            <div className="mt-3 text-xs font-extrabold text-[var(--yinn-muted)]">Aplikasi Populer</div>
-
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {loadingServices
-                ? Array.from({ length: 6 }).map((_, i) => (
-                    <div
-                      key={`pop-skel-${i}`}
-                      className="rounded-2xl border border-[var(--yinn-border)] p-3"
-                    >
-                      <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)]">
-                        <SkeletonBox className="h-9 w-9 rounded-xl" />
-                      </div>
-                      <div className="mt-2">
-                        <SkeletonBox className="h-3 w-16 mx-auto rounded-lg" />
-                      </div>
-                    </div>
-                  ))
-                : popularResolved.map((p) => (
-                    <motion.button
-                      key={String(p.svc?.service_code)}
-                      {...revealProps}
-                      onClick={() => {
-                        toast.success(`Pilih: ${p.name}`);
-                        selectServiceAndGoCountries(p.svc);
-                      }}
-                      className="rounded-2xl border border-[var(--yinn-border)] p-3 text-center hover:bg-black/5 dark:hover:bg-white/5"
-                    >
-                      <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
-                        <img src={p.img} alt={p.name} className="h-9 w-9" loading="lazy" />
-                      </div>
-                      <div className="mt-2 truncate text-xs font-extrabold">{p.name}</div>
-                    </motion.button>
-                  ))}
+            <div className="mt-3 text-xs font-extrabold text-[var(--yinn-muted)]">
+              Aplikasi Populer
             </div>
 
-            <div className="mt-3 rounded-2xl border border-[var(--yinn-border)]">
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {popularResolved.map((p) => (
+                <Reveal key={String(p.svc?.service_code)}>
+                  <button
+                    onClick={() => {
+                      toast.success(`Pilih: ${p.name}`);
+                      selectServiceAndGoCountries(p.svc);
+                    }}
+                    className="w-full rounded-2xl border border-[var(--yinn-border)] p-3 text-center hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
+                      <img src={p.img} alt={p.name} className="h-9 w-9" loading="lazy" />
+                    </div>
+                    <div className="mt-2 truncate text-xs font-extrabold">{p.name}</div>
+                  </button>
+                </Reveal>
+              ))}
+            </div>
+
+            <div className="mt-3 overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
               {loadingServices ? (
                 <div className="divide-y divide-[var(--yinn-border)]">
                   <SkeletonRowApp />
@@ -1123,27 +1286,29 @@ export default function OrderPage() {
               ) : (
                 <div className="divide-y divide-[var(--yinn-border)]">
                   {filteredServices.map((s) => (
-                    <motion.button
-                      key={String(s?.service_code)}
-                      {...revealProps}
-                      onClick={() => {
-                        toast.success(`Pilih: ${s.service_name}`);
-                        selectServiceAndGoCountries(s);
-                      }}
-                      className="flex w-full items-center gap-3 p-3 text-left hover:bg-black/5 dark:hover:bg-white/5"
-                    >
-                      <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
-                        <img src={s.service_img} alt={s.service_name} className="h-8 w-8" loading="lazy" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-extrabold">{s.service_name}</div>
-                        <div className="truncate text-[11px] text-[var(--yinn-muted)]">Tap untuk pilih</div>
-                      </div>
-                      <ChevronRight size={18} className="text-[var(--yinn-muted)]" />
-                    </motion.button>
+                    <Reveal key={String(s?.service_code)}>
+                      <button
+                        onClick={() => {
+                          toast.success(`Pilih: ${s.service_name}`);
+                          selectServiceAndGoCountries(s);
+                        }}
+                        className="flex w-full items-center gap-3 p-3 text-left hover:bg-black/5 dark:hover:bg-white/5"
+                      >
+                        <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
+                          <img src={s.service_img} alt={s.service_name} className="h-8 w-8" loading="lazy" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-extrabold">{s.service_name}</div>
+                          <div className="truncate text-[11px] text-[var(--yinn-muted)]">Tap untuk pilih</div>
+                        </div>
+                        <ChevronRight size={18} className="text-[var(--yinn-muted)]" />
+                      </button>
+                    </Reveal>
                   ))}
                   {!filteredServices.length && (
-                    <div className="p-4 text-sm text-[var(--yinn-muted)]">Tidak ada aplikasi yang cocok.</div>
+                    <div className="p-4 text-sm text-[var(--yinn-muted)]">
+                      Tidak ada aplikasi yang cocok.
+                    </div>
                   )}
                 </div>
               )}
@@ -1169,8 +1334,12 @@ export default function OrderPage() {
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-extrabold">{pickedService?.service_name || "—"}</div>
-                  <div className="truncate text-xs text-[var(--yinn-muted)]">Aplikasi yang dipilih</div>
+                  <div className="truncate text-sm font-extrabold">
+                    {pickedService?.service_name || "—"}
+                  </div>
+                  <div className="truncate text-xs text-[var(--yinn-muted)]">
+                    Aplikasi yang dipilih
+                  </div>
                 </div>
 
                 <button
@@ -1224,7 +1393,7 @@ export default function OrderPage() {
                   Pilih aplikasi dulu.
                 </div>
               ) : loadingCountries ? (
-                <div className="rounded-2xl border border-[var(--yinn-border)]">
+                <div className="overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
                   <div className="divide-y divide-[var(--yinn-border)]">
                     <SkeletonRowCountry />
                     <SkeletonRowCountry />
@@ -1237,121 +1406,156 @@ export default function OrderPage() {
                 <div className="rounded-2xl border border-[var(--yinn-border)]">
                   <div className="divide-y divide-[var(--yinn-border)]">
                     {filteredCountries.map((c) => {
-                      const open = String(expandedCountryId) === String(c?.number_id);
+                      const open =
+                        String(expandedCountryId) === String(c?.number_id);
                       const minp = minPriceFromCountry(c);
-                      const pricelist = Array.isArray(c?.pricelist) ? c.pricelist : [];
+                      const pricelist = Array.isArray(c?.pricelist)
+                        ? c.pricelist
+                        : [];
                       const flagUrl = flagUrlFromCountry(c);
-                      const stock = countryStock(c);
+
+                      const stock = realStockFromCountry(c);
 
                       return (
                         <div key={String(c?.number_id || Math.random())}>
-                          <motion.button
-                            {...revealProps}
-                            className="flex w-full items-center gap-3 p-3 text-left hover:bg-black/5 dark:hover:bg-white/5"
-                            onClick={() => setExpandedCountryId(open ? "" : String(c?.number_id || ""))}
-                          >
-                            <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
-                              {flagUrl ? (
-                                <img
-                                  src={flagUrl}
-                                  alt={c?.name || "Flag"}
-                                  className="h-6 w-6"
-                                  loading="lazy"
-                                />
-                              ) : (
-                                <div className="text-sm font-extrabold">🏳️</div>
-                              )}
-                            </div>
-
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-extrabold">{c?.name || "—"}</div>
-                              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-[var(--yinn-muted)]">
-                                <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                                  {c?.prefix ? `+${String(c.prefix).replace("+", "")}` : "—"}
-                                </span>
-                                <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                                  {c?.short ? String(c.short) : "—"}
-                                </span>
-                                <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                                  Stock {stock || 0}
-                                </span>
-                                <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                                  Mulai {minp ? formatIDR(applyMarkup(minp)) : "—"}
-                                </span>
+                          <Reveal>
+                            <button
+                              className="flex w-full items-center gap-3 p-3 text-left hover:bg-black/5 dark:hover:bg-white/5"
+                              onClick={() => {
+                                setExpandedCountryId(
+                                  open ? "" : String(c?.number_id || "")
+                                );
+                              }}
+                            >
+                              <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
+                                {flagUrl ? (
+                                  <img
+                                    src={flagUrl}
+                                    alt={c?.name || "Flag"}
+                                    className="h-6 w-6"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className="text-sm font-extrabold">🏳️</div>
+                                )}
                               </div>
-                            </div>
 
-                            <ChevronRight
-                              size={18}
-                              className={cx("text-[var(--yinn-muted)] transition", open ? "rotate-90" : "")}
-                            />
-                          </motion.button>
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-sm font-extrabold">
+                                  {c?.name || "—"}
+                                </div>
+                                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-[var(--yinn-muted)]">
+                                  <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
+                                    {c?.prefix
+                                      ? `+${String(c.prefix).replace("+", "")}`
+                                      : "—"}
+                                  </span>
+                                  <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
+                                    {c?.short ? String(c.short) : "—"}
+                                  </span>
+                                  <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
+                                    Stok {stock || 0}
+                                  </span>
+                                  <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
+                                    Mulai{" "}
+                                    {minp ? formatIDR(applyMarkup(minp)) : "—"}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <ChevronRight
+                                size={18}
+                                className={cx(
+                                  "text-[var(--yinn-muted)] transition",
+                                  open ? "rotate-90" : ""
+                                )}
+                              />
+                            </button>
+                          </Reveal>
 
                           {open && (
                             <div className="px-3 pb-3">
-                              {providersBootLoading ? (
-                                <div className="overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
-                                  <div className="divide-y divide-[var(--yinn-border)]">
-                                    <SkeletonRowProvider />
-                                    <SkeletonRowProvider />
-                                    <SkeletonRowProvider />
-                                  </div>
-                                </div>
-                              ) : pricelist.length === 0 ? (
+                              {pricelist.length === 0 ? (
                                 <div className="rounded-2xl border border-[var(--yinn-border)] p-3 text-xs text-[var(--yinn-muted)]">
                                   Provider kosong / stok habis untuk negara ini.
                                 </div>
                               ) : (
                                 <div className="overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
                                   <div className="divide-y divide-[var(--yinn-border)]">
-                                    {pricelist.map((p) => {
-                                      const pid = String(p?.provider_id || "");
-                                      const key = `${String(c?.number_id || "")}-${pid}`;
-                                      const loading = orderingKey === key;
+                                    {orderingKey
+                                      ? (
+                                          <>
+                                            <SkeletonRowProvider />
+                                            <SkeletonRowProvider />
+                                          </>
+                                        )
+                                      : null}
 
-                                      const serverText = String(p?.server || p?.server_id || "").trim();
-                                      const serverLabel = serverText ? `Server ${serverText}` : "Server";
+                                    {pricelist
+                                      .filter((p) =>
+                                        String(p?.provider_id || "").trim()
+                                      )
+                                      .map((p) => {
+                                        const pid = String(p?.provider_id || "");
+                                        const key = `${String(
+                                          c?.number_id || ""
+                                        )}-${pid}`;
+                                        const loading = orderingKey === key;
 
-                                      const base = Number(p?.price || 0) || 0;
-                                      const sell = applyMarkup(base);
+                                        const serverText = String(
+                                          p?.server || p?.server_id || ""
+                                        ).trim();
+                                        const serverLabel = serverText
+                                          ? `Server ${serverText}`
+                                          : "Server";
 
-                                      return (
-                                        <motion.div key={pid} {...revealProps} className="relative">
-                                          {loading ? (
-                                            <div className="absolute inset-0 z-10 bg-[var(--yinn-surface)]/70">
-                                              <div className="h-full w-full yinn-skel" />
-                                            </div>
-                                          ) : null}
+                                        const base = safeNum(p?.price);
+                                        const sell = applyMarkup(base);
 
-                                          <div className="flex items-center gap-2 p-3">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                              <span className="rounded-full bg-blue-500/10 px-2 py-1 text-[11px] font-extrabold text-blue-600">
-                                                {serverLabel}
-                                              </span>
-                                              <span className="rounded-full bg-black/5 px-2 py-1 text-[11px] font-bold text-[var(--yinn-muted)] dark:bg-white/5">
-                                                ID: {pid || "—"}
-                                              </span>
-                                              {p?.rate ? (
-                                                <span className="rounded-full bg-black/5 px-2 py-1 text-[11px] font-extrabold text-[var(--yinn-muted)] dark:bg-white/5">
-                                                  {String(p.rate)}
-                                                </span>
+                                        return (
+                                          <Reveal key={pid}>
+                                            <div className="relative">
+                                              {loading ? (
+                                                <div className="absolute inset-0 z-10 overflow-hidden rounded-2xl">
+                                                  <div className="absolute inset-0 bg-[var(--yinn-surface)] opacity-65" />
+                                                  <div className="yinn-shimmer absolute inset-0" />
+                                                </div>
                                               ) : null}
-                                            </div>
 
-                                            <div className="ms-auto flex items-center gap-2">
-                                              <div className="text-sm font-extrabold">{formatIDR(sell)}</div>
-                                              <button
-                                                onClick={() => orderFromProvider(c, p)}
-                                                className="rounded-xl border border-[var(--yinn-border)] px-4 py-2 text-xs font-extrabold"
-                                                disabled={!!orderingKey}
-                                              >
-                                                Order
-                                              </button>
+                                              <div className="flex items-center gap-2 p-3">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                  <span className="rounded-full bg-blue-500/10 px-2 py-1 text-[11px] font-extrabold text-blue-600">
+                                                    {serverLabel}
+                                                  </span>
+                                                  <span className="rounded-full bg-black/5 px-2 py-1 text-[11px] font-bold text-[var(--yinn-muted)] dark:bg-white/5">
+                                                    ID: {pid || "—"}
+                                                  </span>
+                                                  {p?.rate ? (
+                                                    <span className="rounded-full bg-zinc-500/10 px-2 py-1 text-[11px] font-extrabold text-zinc-600">
+                                                      {String(p.rate)}
+                                                    </span>
+                                                  ) : null}
+                                                </div>
+
+                                                <div className="ms-auto flex items-center gap-2">
+                                                  <div className="text-sm font-extrabold">
+                                                    {formatIDR(sell)}
+                                                  </div>
+                                                  <button
+                                                    onClick={() =>
+                                                      orderFromProvider(c, p)
+                                                    }
+                                                    className="rounded-xl border border-[var(--yinn-border)] px-4 py-2 text-xs font-extrabold"
+                                                    disabled={!!orderingKey}
+                                                  >
+                                                    Order
+                                                  </button>
+                                                </div>
+                                              </div>
                                             </div>
-                                          </div>
-                                        </motion.div>
-                                      );
-                                    })}
+                                          </Reveal>
+                                        );
+                                      })}
                                   </div>
                                 </div>
                               )}
@@ -1362,7 +1566,9 @@ export default function OrderPage() {
                     })}
 
                     {!filteredCountries.length && (
-                      <div className="p-4 text-sm text-[var(--yinn-muted)]">Negara tidak ditemukan.</div>
+                      <div className="p-4 text-sm text-[var(--yinn-muted)]">
+                        Negara tidak ditemukan.
+                      </div>
                     )}
                   </div>
                 </div>

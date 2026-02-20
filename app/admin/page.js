@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import toast, { Toaster } from "react-hot-toast";
-import { adminUsersList, adminBalanceSet, adminBanSet } from "../_lib/adminClient";
+import {
+  adminUsersList,
+  adminBalanceSet,
+  adminBanSet,
+  adminSettingsGet,
+  adminSettingsSet,
+} from "../_lib/adminClient";
 
 function cx(...xs) {
   return xs.filter(Boolean).join(" ");
@@ -28,6 +34,11 @@ export default function AdminPage() {
   const [newBalance, setNewBalance] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // ===== Settings (markup) =====
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [markupFlat, setMarkupFlat] = useState("1000");
+  const [savingSetting, setSavingSetting] = useState(false);
+
   async function load() {
     setLoading(true);
     try {
@@ -45,10 +56,31 @@ export default function AdminPage() {
     }
   }
 
+  async function loadSettings() {
+    setSettingsLoading(true);
+    try {
+      const r = await adminSettingsGet({ key: "markup_flat_idr" });
+      if (!r.ok || !r.json?.ok) {
+        // jangan ganggu fitur lain, cukup notif
+        toast.error(r.json?.message || "Gagal load setting markup");
+        return;
+      }
+      const v = r.json?.data?.items?.markup_flat_idr?.value;
+      if (typeof v === "string" && v.trim() !== "") setMarkupFlat(v.trim());
+    } finally {
+      setSettingsLoading(false);
+    }
+  }
+
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offset]);
+
+  useEffect(() => {
+    loadSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const canPrev = offset > 0;
   const canNext = offset + limit < total;
@@ -89,6 +121,24 @@ export default function AdminPage() {
     }
   }
 
+  async function onSaveMarkup() {
+    const n = Number(markupFlat);
+    if (!Number.isFinite(n) || n < 0) return toast.error("Markup tidak valid");
+
+    setSavingSetting(true);
+    try {
+      const r = await adminSettingsSet({
+        key: "markup_flat_idr",
+        value: String(Math.floor(n)),
+      });
+      if (!r.ok || !r.json?.ok) return toast.error(r.json?.message || "Gagal simpan setting");
+      toast.success("Markup tersimpan");
+      await loadSettings();
+    } finally {
+      setSavingSetting(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
       <Toaster position="top-right" />
@@ -97,7 +147,7 @@ export default function AdminPage() {
         <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
           <div className="text-lg font-extrabold">Admin Control Panel</div>
           <div className="mt-1 text-xs text-[var(--yinn-muted)]">
-            Kelola user: saldo & ban/unban.
+            Kelola user: saldo & ban/unban + pengaturan markup.
           </div>
 
           <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center">
@@ -143,6 +193,7 @@ export default function AdminPage() {
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-[1.6fr_1fr]">
+          {/* LEFT: user list */}
           <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)]">
             <div className="border-b border-[var(--yinn-border)] p-3 text-sm font-extrabold">
               Daftar User
@@ -189,6 +240,7 @@ export default function AdminPage() {
             )}
           </div>
 
+          {/* RIGHT: actions + settings */}
           <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
             <div className="text-sm font-extrabold">Aksi</div>
             <div className="mt-1 text-xs text-[var(--yinn-muted)]">
@@ -241,6 +293,51 @@ export default function AdminPage() {
                 Belum ada user dipilih.
               </div>
             )}
+
+            {/* SETTINGS: markup */}
+            <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] p-3">
+              <div className="text-sm font-extrabold">Settings</div>
+              <div className="mt-1 text-xs text-[var(--yinn-muted)]">
+                Ubah markup global (flat IDR).
+              </div>
+
+              <div className="mt-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-extrabold text-[var(--yinn-muted)]">markup_flat_idr</div>
+                  <button
+                    onClick={loadSettings}
+                    disabled={settingsLoading || savingSetting}
+                    className="rounded-lg border border-[var(--yinn-border)] px-3 py-1 text-[11px] font-extrabold disabled:opacity-60"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                <input
+                  value={markupFlat}
+                  onChange={(e) => setMarkupFlat(e.target.value)}
+                  className="mt-2 w-full rounded-xl border border-[var(--yinn-border)] bg-transparent px-3 py-2 text-sm outline-none"
+                  inputMode="numeric"
+                  disabled={settingsLoading || savingSetting}
+                />
+
+                <button
+                  onClick={onSaveMarkup}
+                  disabled={settingsLoading || savingSetting}
+                  className="mt-3 w-full rounded-xl px-4 py-2 text-sm font-extrabold text-white disabled:opacity-60"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                  }}
+                >
+                  Simpan Markup
+                </button>
+
+                <div className="mt-2 text-[11px] text-[var(--yinn-muted)]">
+                  Dipakai untuk harga jual (flat). Nilai disimpan di backend (SQLite).
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -1308,7 +1308,7 @@ export default function OrderPage() {
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
                 <div className="text-xs font-extrabold">Stok kecil</div>
                 <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
-                  Stok berasal dari server RumahOTP (bisa berubah tiap detik).
+                  Stok dari dari server (bisa berubah kapan saja).
                 </div>
               </div>
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">

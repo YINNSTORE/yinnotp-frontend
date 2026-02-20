@@ -21,6 +21,8 @@ const formatIDR = (n) =>
     maximumFractionDigits: 0,
   }).format(Number.isFinite(Number(n)) ? Number(n) : 0);
 
+const SETTING_MARKUP_KEY = "markup_flat_idr";
+
 export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
@@ -34,15 +36,18 @@ export default function AdminPage() {
   const [newBalance, setNewBalance] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // ===== Settings (markup) =====
-  const [settingsLoading, setSettingsLoading] = useState(true);
+  // settings (markup)
+  const [loadingSettings, setLoadingSettings] = useState(true);
+  const [savingSettings, setSavingSettings] = useState(false);
   const [markupFlat, setMarkupFlat] = useState("1000");
-  const [savingSetting, setSavingSetting] = useState(false);
 
-  async function load() {
+  async function load(next = {}) {
+    const nextOffset = Number.isFinite(Number(next.offset)) ? Number(next.offset) : offset;
+    const nextQ = typeof next.q === "string" ? next.q : q;
+
     setLoading(true);
     try {
-      const r = await adminUsersList({ limit, offset, q: q.trim() });
+      const r = await adminUsersList({ limit, offset: nextOffset, q: nextQ.trim() });
       if (!r.ok || !r.json?.ok) {
         toast.error(r.json?.message || "Gagal load user (cek token admin)");
         setItems([]);
@@ -57,23 +62,23 @@ export default function AdminPage() {
   }
 
   async function loadSettings() {
-    setSettingsLoading(true);
+    setLoadingSettings(true);
     try {
-      const r = await adminSettingsGet({ key: "markup_flat_idr" });
+      const r = await adminSettingsGet(SETTING_MARKUP_KEY);
       if (!r.ok || !r.json?.ok) {
-        // jangan ganggu fitur lain, cukup notif
-        toast.error(r.json?.message || "Gagal load setting markup");
+        // jangan ganggu admin panel, cukup toast
+        toast.error(r.json?.message || "Gagal load settings");
         return;
       }
-      const v = r.json?.data?.items?.markup_flat_idr?.value;
-      if (typeof v === "string" && v.trim() !== "") setMarkupFlat(v.trim());
+      const v = String(r.json?.data?.value ?? "1000");
+      setMarkupFlat(v);
     } finally {
-      setSettingsLoading(false);
+      setLoadingSettings(false);
     }
   }
 
   useEffect(() => {
-    load();
+    load({ offset });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offset]);
 
@@ -125,17 +130,14 @@ export default function AdminPage() {
     const n = Number(markupFlat);
     if (!Number.isFinite(n) || n < 0) return toast.error("Markup tidak valid");
 
-    setSavingSetting(true);
+    setSavingSettings(true);
     try {
-      const r = await adminSettingsSet({
-        key: "markup_flat_idr",
-        value: String(Math.floor(n)),
-      });
-      if (!r.ok || !r.json?.ok) return toast.error(r.json?.message || "Gagal simpan setting");
-      toast.success("Markup tersimpan");
+      const r = await adminSettingsSet(SETTING_MARKUP_KEY, String(Math.floor(n)));
+      if (!r.ok || !r.json?.ok) return toast.error(r.json?.message || "Gagal simpan settings");
+      toast.success("Markup disimpan");
       await loadSettings();
     } finally {
-      setSavingSetting(false);
+      setSavingSettings(false);
     }
   }
 
@@ -147,20 +149,26 @@ export default function AdminPage() {
         <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
           <div className="text-lg font-extrabold">Admin Control Panel</div>
           <div className="mt-1 text-xs text-[var(--yinn-muted)]">
-            Kelola user: saldo & ban/unban + pengaturan markup.
+            Kelola user: saldo & ban/unban + setting aplikasi.
           </div>
 
           <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center">
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  setOffset(0);
+                  load({ offset: 0, q });
+                }
+              }}
               placeholder="Cari username..."
               className="w-full rounded-xl border border-[var(--yinn-border)] bg-transparent px-3 py-2 text-sm outline-none"
             />
             <button
               onClick={() => {
                 setOffset(0);
-                load();
+                load({ offset: 0, q });
               }}
               className="rounded-xl border border-[var(--yinn-border)] px-4 py-2 text-sm font-extrabold"
               disabled={loading}
@@ -192,8 +200,54 @@ export default function AdminPage() {
           </div>
         </div>
 
+        {/* SETTINGS */}
+        <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
+          <div className="text-sm font-extrabold">App Settings</div>
+          <div className="mt-1 text-xs text-[var(--yinn-muted)]">
+            Ubah markup keuntungan global (flat IDR).
+          </div>
+
+          <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto] md:items-end">
+            <div>
+              <div className="text-xs font-extrabold text-[var(--yinn-muted)]">
+                Markup Flat (IDR) • key: {SETTING_MARKUP_KEY}
+              </div>
+              <input
+                value={markupFlat}
+                onChange={(e) => setMarkupFlat(e.target.value)}
+                inputMode="numeric"
+                className="mt-2 w-full rounded-xl border border-[var(--yinn-border)] bg-transparent px-3 py-2 text-sm outline-none"
+                disabled={loadingSettings}
+              />
+              <div className="mt-2 text-[11px] text-[var(--yinn-muted)]">
+                Preview: <span className="font-bold">{formatIDR(Number(markupFlat) || 0)}</span>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={loadSettings}
+                disabled={loadingSettings || savingSettings}
+                className="rounded-xl border border-[var(--yinn-border)] px-4 py-2 text-sm font-extrabold disabled:opacity-60"
+              >
+                Refresh
+              </button>
+              <button
+                onClick={onSaveMarkup}
+                disabled={savingSettings}
+                className="rounded-xl px-4 py-2 text-sm font-extrabold text-white disabled:opacity-60"
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                }}
+              >
+                Simpan
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div className="mt-4 grid gap-3 md:grid-cols-[1.6fr_1fr]">
-          {/* LEFT: user list */}
           <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)]">
             <div className="border-b border-[var(--yinn-border)] p-3 text-sm font-extrabold">
               Daftar User
@@ -228,7 +282,8 @@ export default function AdminPage() {
                         ) : null}
                       </div>
                       <div className="mt-0.5 text-[11px] text-[var(--yinn-muted)]">
-                        Saldo: <span className="font-bold">{formatIDR(u.balance_idr)}</span>
+                        Saldo:{" "}
+                        <span className="font-bold">{formatIDR(u.balance_idr)}</span>
                       </div>
                     </div>
                   </button>
@@ -240,7 +295,6 @@ export default function AdminPage() {
             )}
           </div>
 
-          {/* RIGHT: actions + settings */}
           <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
             <div className="text-sm font-extrabold">Aksi</div>
             <div className="mt-1 text-xs text-[var(--yinn-muted)]">
@@ -254,12 +308,16 @@ export default function AdminPage() {
                   <div className="mt-1 text-sm font-extrabold">{picked.username}</div>
                   <div className="mt-1 text-xs text-[var(--yinn-muted)]">
                     Role: <span className="font-bold">{picked.role}</span> • Status:{" "}
-                    <span className="font-bold">{picked.is_banned ? "BANNED" : "ACTIVE"}</span>
+                    <span className="font-bold">
+                      {picked.is_banned ? "BANNED" : "ACTIVE"}
+                    </span>
                   </div>
                 </div>
 
                 <div className="mt-3">
-                  <div className="text-xs font-extrabold text-[var(--yinn-muted)]">Set Saldo (IDR)</div>
+                  <div className="text-xs font-extrabold text-[var(--yinn-muted)]">
+                    Set Saldo (IDR)
+                  </div>
                   <input
                     value={newBalance}
                     onChange={(e) => setNewBalance(e.target.value)}
@@ -293,51 +351,6 @@ export default function AdminPage() {
                 Belum ada user dipilih.
               </div>
             )}
-
-            {/* SETTINGS: markup */}
-            <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] p-3">
-              <div className="text-sm font-extrabold">Settings</div>
-              <div className="mt-1 text-xs text-[var(--yinn-muted)]">
-                Ubah markup global (flat IDR).
-              </div>
-
-              <div className="mt-3">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs font-extrabold text-[var(--yinn-muted)]">markup_flat_idr</div>
-                  <button
-                    onClick={loadSettings}
-                    disabled={settingsLoading || savingSetting}
-                    className="rounded-lg border border-[var(--yinn-border)] px-3 py-1 text-[11px] font-extrabold disabled:opacity-60"
-                  >
-                    Refresh
-                  </button>
-                </div>
-
-                <input
-                  value={markupFlat}
-                  onChange={(e) => setMarkupFlat(e.target.value)}
-                  className="mt-2 w-full rounded-xl border border-[var(--yinn-border)] bg-transparent px-3 py-2 text-sm outline-none"
-                  inputMode="numeric"
-                  disabled={settingsLoading || savingSetting}
-                />
-
-                <button
-                  onClick={onSaveMarkup}
-                  disabled={settingsLoading || savingSetting}
-                  className="mt-3 w-full rounded-xl px-4 py-2 text-sm font-extrabold text-white disabled:opacity-60"
-                  style={{
-                    background:
-                      "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
-                  }}
-                >
-                  Simpan Markup
-                </button>
-
-                <div className="mt-2 text-[11px] text-[var(--yinn-muted)]">
-                  Dipakai untuk harga jual (flat). Nilai disimpan di backend (SQLite).
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>

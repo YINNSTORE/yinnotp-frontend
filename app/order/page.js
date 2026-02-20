@@ -58,13 +58,38 @@ function msLabel(ms) {
   return `${Math.round(n)}ms`;
 }
 
-/** FIX #6: Dynamic Color Response (range) */
-function responseColorClass(ms) {
+/** range warna (dipakai badge ms) */
+function msRange(ms) {
   const n = Number(ms);
-  if (!Number.isFinite(n) || n <= 0) return "text-[var(--yinn-muted)]";
-  if (n <= 400) return "text-[#22c55e]"; // hijau
-  if (n <= 600) return "text-[#eab308]"; // kuning
-  return "text-[#ef4444]"; // merah
+  if (!Number.isFinite(n) || n <= 0) return "muted";
+  if (n <= 400) return "good";
+  if (n <= 600) return "warn";
+  return "bad";
+}
+
+/** FIX: ms dibungkus badge kayak "Online" */
+function MsBadge({ ms }) {
+  const r = msRange(ms);
+  const cls =
+    r === "good"
+      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
+      : r === "warn"
+      ? "border-[#eab308]/30 bg-[#eab308]/10 text-[#a16207]"
+      : r === "bad"
+      ? "border-[#ef4444]/30 bg-[#ef4444]/10 text-[#ef4444]"
+      : "border-zinc-500/30 bg-zinc-500/10 text-zinc-600";
+
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold",
+        cls
+      )}
+      title="Response server"
+    >
+      {msLabel(ms)}
+    </span>
+  );
 }
 
 function statusLabel(v) {
@@ -130,11 +155,7 @@ function flagCodeForCountry(country) {
   }
 
   const iso2 = shortRaw.toLowerCase();
-
-  const EXCEPT = {
-    gi: "gib",
-  };
-
+  const EXCEPT = { gi: "gib" };
   if (EXCEPT[iso2]) return EXCEPT[iso2];
   if (iso2) return iso2;
 
@@ -157,7 +178,7 @@ function flagUrlFromCountry(country) {
   return `https://assets.rumahotp.com/flags/${code}.png`;
 }
 
-/* ================= FIX #2: Scroll reveal (IntersectionObserver) ================= */
+/* ================= Scroll Reveal (IntersectionObserver) ================= */
 
 function Reveal({ children, className = "" }) {
   const ref = useRef(null);
@@ -172,7 +193,7 @@ function Reveal({ children, className = "" }) {
         for (const e of entries) {
           if (e.isIntersecting) {
             setInView(true);
-            obs.unobserve(e.target); // run once per item for perf
+            obs.unobserve(e.target);
           }
         }
       },
@@ -188,8 +209,8 @@ function Reveal({ children, className = "" }) {
       ref={ref}
       className={cx(
         "transform-gpu will-change-transform",
-        "transition duration-300 ease-out",
-        inView ? "opacity-100 scale-100" : "opacity-0 scale-[0.8]",
+        "transition-[transform,opacity] duration-300 ease-out",
+        inView ? "opacity-100 scale-100" : "opacity-0 scale-[0.9]",
         className
       )}
     >
@@ -198,34 +219,23 @@ function Reveal({ children, className = "" }) {
   );
 }
 
-/* ================= FIX #1: Skeleton shimmer loading ================= */
+/* ================= FIX: Skeleton shimmer (kilauan bergerak + mengikuti layout) ================= */
 
-function SkeletonLine({ className = "" }) {
-  return (
-    <div
-      className={cx(
-        "relative overflow-hidden rounded-lg bg-black/5 dark:bg-white/5",
-        className
-      )}
-    >
-      <div className="yinn-shimmer absolute inset-0" />
-    </div>
-  );
+function Skel({ className = "" }) {
+  return <div className={cx("yinn-skel", className)} />;
 }
 
 function SkeletonRowApp() {
   return (
     <div className="flex items-center gap-3 p-3">
-      <div className="relative h-10 w-10 overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
-        <div className="yinn-shimmer absolute inset-0" />
-      </div>
+      <Skel className="h-10 w-10 rounded-2xl border border-[var(--yinn-border)]" />
       <div className="min-w-0 flex-1">
-        <SkeletonLine className="h-3 w-44" />
+        <Skel className="h-3 w-44 rounded-md" />
         <div className="mt-2">
-          <SkeletonLine className="h-3 w-28" />
+          <Skel className="h-3 w-28 rounded-md" />
         </div>
       </div>
-      <SkeletonLine className="h-5 w-5 rounded-md" />
+      <Skel className="h-5 w-5 rounded-md" />
     </div>
   );
 }
@@ -233,34 +243,54 @@ function SkeletonRowApp() {
 function SkeletonRowCountry() {
   return (
     <div className="flex items-center gap-3 p-3">
-      <div className="relative h-10 w-10 overflow-hidden rounded-xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
-        <div className="yinn-shimmer absolute inset-0" />
-      </div>
+      <Skel className="h-10 w-10 rounded-xl border border-[var(--yinn-border)]" />
       <div className="min-w-0 flex-1">
-        <SkeletonLine className="h-3 w-48" />
+        <Skel className="h-3 w-48 rounded-md" />
         <div className="mt-2 flex flex-wrap gap-2">
-          <SkeletonLine className="h-4 w-14 rounded-full" />
-          <SkeletonLine className="h-4 w-14 rounded-full" />
-          <SkeletonLine className="h-4 w-28 rounded-full" />
+          <Skel className="h-4 w-14 rounded-full" />
+          <Skel className="h-4 w-14 rounded-full" />
+          <Skel className="h-4 w-24 rounded-full" />
+          <Skel className="h-4 w-28 rounded-full" />
         </div>
       </div>
-      <SkeletonLine className="h-5 w-5 rounded-md" />
+      <Skel className="h-5 w-5 rounded-md" />
     </div>
   );
 }
 
-function SkeletonRowProvider() {
+function SkeletonProviderRow() {
   return (
     <div className="flex items-center gap-2 p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <SkeletonLine className="h-6 w-24 rounded-full" />
-        <SkeletonLine className="h-6 w-20 rounded-full" />
-        <SkeletonLine className="h-6 w-16 rounded-full" />
+        <Skel className="h-6 w-24 rounded-full" />
+        <Skel className="h-6 w-20 rounded-full" />
+        <Skel className="h-6 w-16 rounded-full" />
       </div>
       <div className="ms-auto flex items-center gap-2">
-        <SkeletonLine className="h-5 w-20" />
-        <SkeletonLine className="h-9 w-16 rounded-xl" />
+        <Skel className="h-5 w-20 rounded-md" />
+        <Skel className="h-9 w-16 rounded-xl" />
       </div>
+    </div>
+  );
+}
+
+/** Skeleton grid buat card "Aplikasi Populer" biar ikut struktur */
+function SkeletonPopularGrid() {
+  return (
+    <div className="mt-2 grid grid-cols-3 gap-2">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div
+          key={i}
+          className="rounded-2xl border border-[var(--yinn-border)] p-3"
+        >
+          <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)]">
+            <Skel className="h-9 w-9 rounded-xl" />
+          </div>
+          <div className="mt-2">
+            <Skel className="mx-auto h-3 w-16 rounded-md" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -275,6 +305,8 @@ function FullscreenBoot({ show }) {
           <div className="mt-2 text-xs text-[var(--yinn-muted)]">
             Mengambil layanan & status server
           </div>
+
+          {/* ikut struktur list layanan */}
           <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
             <div className="divide-y divide-[var(--yinn-border)]">
               <SkeletonRowApp />
@@ -328,13 +360,13 @@ function Modal({ open, onClose, title, subtitle, children }) {
           </div>
         </div>
 
+        {/* FIX: scroll lebih smooth (momentum + perf) */}
         <div
-          className="px-4 pb-[calc(16px+env(safe-area-inset-bottom))]"
+          className="px-4 pb-[calc(16px+env(safe-area-inset-bottom))] yinn-smoothscroll"
           style={{
             maxHeight: "72vh",
             overflowY: "auto",
             WebkitOverflowScrolling: "touch",
-            scrollBehavior: "smooth",
             overscrollBehavior: "contain",
           }}
         >
@@ -411,9 +443,7 @@ export default function OrderPage() {
   const filteredServices = useMemo(() => {
     const q = normalizeName(serviceSearch);
     if (!q) return services;
-    return services.filter((s) =>
-      normalizeName(s?.service_name).includes(q)
-    );
+    return services.filter((s) => normalizeName(s?.service_name).includes(q));
   }, [services, serviceSearch]);
 
   const filteredCountries = useMemo(() => {
@@ -422,11 +452,9 @@ export default function OrderPage() {
 
     if (sortMode === "harga") {
       list.sort(
-        (a, b) =>
-          (minPriceFromCountry(a) || 0) - (minPriceFromCountry(b) || 0)
+        (a, b) => (minPriceFromCountry(a) || 0) - (minPriceFromCountry(b) || 0)
       );
     } else {
-      // keep existing sorting feature, but avoid the "stock_total weird" pitfall in display
       list.sort((a, b) => {
         const sa = safeNum(a?.stock_total);
         const sb = safeNum(b?.stock_total);
@@ -447,7 +475,7 @@ export default function OrderPage() {
     return hit?.img || "";
   }, [pickedService]);
 
-  /* ================= FIX #4: Notification toggle (persist) ================= */
+  /* ================= notif persist ================= */
 
   function readNotifPref() {
     try {
@@ -506,7 +534,6 @@ export default function OrderPage() {
     const currentPerm = Notification.permission;
     setNotifState(currentPerm);
 
-    // turning OFF is always allowed
     if (notifEnabled) {
       setNotifEnabled(false);
       saveNotifPref(false);
@@ -514,7 +541,6 @@ export default function OrderPage() {
       return;
     }
 
-    // turning ON: need permission granted
     if (currentPerm === "denied") {
       toast.error("Notifikasi diblokir. Aktifkan di setting browser.");
       setNotifEnabled(false);
@@ -548,10 +574,10 @@ export default function OrderPage() {
         body: phone ? `Nomor: ${phone}\nOTP: ${otp}` : `OTP: ${otp}`,
         silent: false,
       });
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
+
+  /* ================= API ================= */
 
   async function refreshPing() {
     setChecking(true);
@@ -661,7 +687,6 @@ export default function OrderPage() {
       setActiveOrder((o) => {
         if (!o) return o;
         const next = { ...o, status: data.status, otp_code: data.otp_code };
-
         if (String(data?.otp_code || "").trim()) {
           fireOtpNotification(data.otp_code, next.phone_number);
         }
@@ -795,7 +820,6 @@ export default function OrderPage() {
   useEffect(() => {
     let alive = true;
 
-    // init notif pref
     try {
       const pref = readNotifPref();
       setNotifEnabled(pref);
@@ -807,7 +831,6 @@ export default function OrderPage() {
       setBootLoading(true);
       await Promise.allSettled([refreshPing(), loadServices()]);
       if (!alive) return;
-      // re-evaluate notif enabled after permission read
       updateNotifStateFromBrowser();
       setBootLoading(false);
     })();
@@ -849,28 +872,57 @@ export default function OrderPage() {
         * {
           -webkit-tap-highlight-color: transparent;
         }
-        /* FIX #1: Skeleton shimmer putih mengkilap */
-        .yinn-shimmer {
+
+        /* ===== Skeleton shimmer: kelihatan & bergerak (kilauan) ===== */
+        .yinn-skel {
+          position: relative;
+          overflow: hidden;
+          background: rgba(0, 0, 0, 0.08);
+        }
+        html.dark .yinn-skel {
+          background: rgba(255, 255, 255, 0.10);
+        }
+        .yinn-skel::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          transform: translateX(-120%);
           background: linear-gradient(
             90deg,
             rgba(255, 255, 255, 0) 0%,
-            rgba(255, 255, 255, 0.10) 30%,
-            rgba(255, 255, 255, 0.26) 50%,
-            rgba(255, 255, 255, 0.10) 70%,
+            rgba(255, 255, 255, 0.42) 45%,
             rgba(255, 255, 255, 0) 100%
           );
-          transform: translateX(-130%);
-          animation: yinnShimmerMove 1.05s ease-in-out infinite;
+          animation: yinnSkelMove 1.05s ease-in-out infinite;
           filter: blur(0.25px);
-          opacity: 0.95;
+          opacity: 1;
+          pointer-events: none;
         }
-        @keyframes yinnShimmerMove {
+        @keyframes yinnSkelMove {
           0% {
-            transform: translateX(-130%);
+            transform: translateX(-120%);
           }
           100% {
-            transform: translateX(130%);
+            transform: translateX(120%);
           }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .yinn-skel::after {
+            animation: none;
+          }
+        }
+
+        /* ===== Scroll lebih smooth + ringan ===== */
+        .yinn-smoothscroll {
+          scroll-behavior: smooth;
+          -webkit-overflow-scrolling: touch;
+          overscroll-behavior: contain;
+          will-change: scroll-position;
+        }
+        /* Biar list pas panjang gak nge-lag (Chrome mendukung) */
+        .yinn-listperf > * {
+          content-visibility: auto;
+          contain-intrinsic-size: 72px;
         }
       `}</style>
 
@@ -892,10 +944,7 @@ export default function OrderPage() {
             </div>
             <div className="truncate text-[11px] text-[var(--yinn-muted)]">
               {checking ? "checking..." : online ? "online" : "offline"} •{" "}
-              <span className={cx("font-extrabold", responseColorClass(latencyMs))}>
-                {msLabel(latencyMs)}
-              </span>{" "}
-              • update {ago}s lalu
+              <MsBadge ms={latencyMs} /> • update {ago}s lalu
             </div>
           </div>
 
@@ -936,7 +985,6 @@ export default function OrderPage() {
                 {online ? "Online" : "Offline"}
               </div>
 
-              {/* FIX #4: Toggle notif ON/OFF (persist) */}
               <button
                 onClick={toggleNotif}
                 className={cx(
@@ -956,11 +1004,9 @@ export default function OrderPage() {
             </div>
 
             <div className="mt-3 text-sm font-extrabold">
-              <span className={responseColorClass(latencyMs)}>{msLabel(latencyMs)}</span>{" "}
-              response server
+              <MsBadge ms={latencyMs} />{" "}
+              <span className="ms-1">response server</span>
             </div>
-
-            {/* FIX #5: remove "Auto update tanpa refresh." => deleted */}
 
             <button
               onClick={openBuyModal}
@@ -1109,7 +1155,7 @@ export default function OrderPage() {
           )}
         </section>
 
-        {/* bottom cards: Notifikasi + Pertanyaan Umum */}
+        {/* bottom cards */}
         <section className="mt-4 grid grid-cols-2 gap-3">
           <div
             className="rounded-2xl border p-4"
@@ -1141,13 +1187,12 @@ export default function OrderPage() {
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2">
-              {/* FIX #3: tombol Cek clickable & benar */}
               <button
                 className="rounded-xl border border-[var(--yinn-border)] py-2 text-sm font-extrabold"
                 onClick={() => {
                   updateNotifStateFromBrowser();
                   if (notifState === "unsupported") toast.error("Browser tidak support notifikasi");
-                  else toast.success(`Status: ${Notification?.permission || notifState}`);
+                  else toast.success(`Status: ${typeof Notification !== "undefined" ? Notification.permission : notifState}`);
                 }}
               >
                 Cek
@@ -1255,36 +1300,46 @@ export default function OrderPage() {
               Aplikasi Populer
             </div>
 
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {popularResolved.map((p) => (
-                <Reveal key={String(p.svc?.service_code)}>
-                  <button
-                    onClick={() => {
-                      toast.success(`Pilih: ${p.name}`);
-                      selectServiceAndGoCountries(p.svc);
-                    }}
-                    className="w-full rounded-2xl border border-[var(--yinn-border)] p-3 text-center hover:bg-black/5 dark:hover:bg-white/5"
-                  >
-                    <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
-                      <img src={p.img} alt={p.name} className="h-9 w-9" loading="lazy" />
-                    </div>
-                    <div className="mt-2 truncate text-xs font-extrabold">{p.name}</div>
-                  </button>
-                </Reveal>
-              ))}
-            </div>
+            {/* FIX: kalau services lagi load, popular juga tampil skeleton yang sesuai struktur */}
+            {loadingServices ? (
+              <SkeletonPopularGrid />
+            ) : (
+              <div className="mt-2 grid grid-cols-3 gap-2 yinn-listperf">
+                {popularResolved.map((p) => (
+                  <Reveal key={String(p.svc?.service_code)}>
+                    <button
+                      onClick={() => {
+                        toast.success(`Pilih: ${p.name}`);
+                        selectServiceAndGoCountries(p.svc);
+                      }}
+                      className="w-full rounded-2xl border border-[var(--yinn-border)] p-3 text-center hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
+                        <img
+                          src={p.img}
+                          alt={p.name}
+                          className="h-9 w-9"
+                          loading="lazy"
+                        />
+                      </div>
+                      <div className="mt-2 truncate text-xs font-extrabold">
+                        {p.name}
+                      </div>
+                    </button>
+                  </Reveal>
+                ))}
+              </div>
+            )}
 
             <div className="mt-3 overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
               {loadingServices ? (
                 <div className="divide-y divide-[var(--yinn-border)]">
-                  <SkeletonRowApp />
-                  <SkeletonRowApp />
-                  <SkeletonRowApp />
-                  <SkeletonRowApp />
-                  <SkeletonRowApp />
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <SkeletonRowApp key={i} />
+                  ))}
                 </div>
               ) : (
-                <div className="divide-y divide-[var(--yinn-border)]">
+                <div className="divide-y divide-[var(--yinn-border)] yinn-listperf">
                   {filteredServices.map((s) => (
                     <Reveal key={String(s?.service_code)}>
                       <button
@@ -1295,13 +1350,25 @@ export default function OrderPage() {
                         className="flex w-full items-center gap-3 p-3 text-left hover:bg-black/5 dark:hover:bg-white/5"
                       >
                         <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
-                          <img src={s.service_img} alt={s.service_name} className="h-8 w-8" loading="lazy" />
+                          <img
+                            src={s.service_img}
+                            alt={s.service_name}
+                            className="h-8 w-8"
+                            loading="lazy"
+                          />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-extrabold">{s.service_name}</div>
-                          <div className="truncate text-[11px] text-[var(--yinn-muted)]">Tap untuk pilih</div>
+                          <div className="truncate text-sm font-extrabold">
+                            {s.service_name}
+                          </div>
+                          <div className="truncate text-[11px] text-[var(--yinn-muted)]">
+                            Tap untuk pilih
+                          </div>
                         </div>
-                        <ChevronRight size={18} className="text-[var(--yinn-muted)]" />
+                        <ChevronRight
+                          size={18}
+                          className="text-[var(--yinn-muted)]"
+                        />
                       </button>
                     </Reveal>
                   ))}
@@ -1395,25 +1462,19 @@ export default function OrderPage() {
               ) : loadingCountries ? (
                 <div className="overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
                   <div className="divide-y divide-[var(--yinn-border)]">
-                    <SkeletonRowCountry />
-                    <SkeletonRowCountry />
-                    <SkeletonRowCountry />
-                    <SkeletonRowCountry />
-                    <SkeletonRowCountry />
+                    {Array.from({ length: 8 }).map((_, i) => (
+                      <SkeletonRowCountry key={i} />
+                    ))}
                   </div>
                 </div>
               ) : (
                 <div className="rounded-2xl border border-[var(--yinn-border)]">
-                  <div className="divide-y divide-[var(--yinn-border)]">
+                  <div className="divide-y divide-[var(--yinn-border)] yinn-listperf">
                     {filteredCountries.map((c) => {
-                      const open =
-                        String(expandedCountryId) === String(c?.number_id);
+                      const open = String(expandedCountryId) === String(c?.number_id);
                       const minp = minPriceFromCountry(c);
-                      const pricelist = Array.isArray(c?.pricelist)
-                        ? c.pricelist
-                        : [];
+                      const pricelist = Array.isArray(c?.pricelist) ? c.pricelist : [];
                       const flagUrl = flagUrlFromCountry(c);
-
                       const stock = realStockFromCountry(c);
 
                       return (
@@ -1422,9 +1483,7 @@ export default function OrderPage() {
                             <button
                               className="flex w-full items-center gap-3 p-3 text-left hover:bg-black/5 dark:hover:bg-white/5"
                               onClick={() => {
-                                setExpandedCountryId(
-                                  open ? "" : String(c?.number_id || "")
-                                );
+                                setExpandedCountryId(open ? "" : String(c?.number_id || ""));
                               }}
                             >
                               <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
@@ -1446,9 +1505,7 @@ export default function OrderPage() {
                                 </div>
                                 <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-[var(--yinn-muted)]">
                                   <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                                    {c?.prefix
-                                      ? `+${String(c.prefix).replace("+", "")}`
-                                      : "—"}
+                                    {c?.prefix ? `+${String(c.prefix).replace("+", "")}` : "—"}
                                   </span>
                                   <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
                                     {c?.short ? String(c.short) : "—"}
@@ -1457,8 +1514,7 @@ export default function OrderPage() {
                                     Stok {stock || 0}
                                   </span>
                                   <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                                    Mulai{" "}
-                                    {minp ? formatIDR(applyMarkup(minp)) : "—"}
+                                    Mulai {minp ? formatIDR(applyMarkup(minp)) : "—"}
                                   </span>
                                 </div>
                               </div>
@@ -1481,33 +1537,24 @@ export default function OrderPage() {
                                 </div>
                               ) : (
                                 <div className="overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
-                                  <div className="divide-y divide-[var(--yinn-border)]">
-                                    {orderingKey
-                                      ? (
-                                          <>
-                                            <SkeletonRowProvider />
-                                            <SkeletonRowProvider />
-                                          </>
-                                        )
-                                      : null}
+                                  <div className="divide-y divide-[var(--yinn-border)] yinn-listperf">
+                                    {/* kalau lagi order, tampilkan skeleton provider yang sesuai struktur */}
+                                    {orderingKey ? (
+                                      <>
+                                        <SkeletonProviderRow />
+                                        <SkeletonProviderRow />
+                                      </>
+                                    ) : null}
 
                                     {pricelist
-                                      .filter((p) =>
-                                        String(p?.provider_id || "").trim()
-                                      )
+                                      .filter((p) => String(p?.provider_id || "").trim())
                                       .map((p) => {
                                         const pid = String(p?.provider_id || "");
-                                        const key = `${String(
-                                          c?.number_id || ""
-                                        )}-${pid}`;
+                                        const key = `${String(c?.number_id || "")}-${pid}`;
                                         const loading = orderingKey === key;
 
-                                        const serverText = String(
-                                          p?.server || p?.server_id || ""
-                                        ).trim();
-                                        const serverLabel = serverText
-                                          ? `Server ${serverText}`
-                                          : "Server";
+                                        const serverText = String(p?.server || p?.server_id || "").trim();
+                                        const serverLabel = serverText ? `Server ${serverText}` : "Server";
 
                                         const base = safeNum(p?.price);
                                         const sell = applyMarkup(base);
@@ -1518,7 +1565,7 @@ export default function OrderPage() {
                                               {loading ? (
                                                 <div className="absolute inset-0 z-10 overflow-hidden rounded-2xl">
                                                   <div className="absolute inset-0 bg-[var(--yinn-surface)] opacity-65" />
-                                                  <div className="yinn-shimmer absolute inset-0" />
+                                                  <Skel className="absolute inset-0" />
                                                 </div>
                                               ) : null}
 
@@ -1542,9 +1589,7 @@ export default function OrderPage() {
                                                     {formatIDR(sell)}
                                                   </div>
                                                   <button
-                                                    onClick={() =>
-                                                      orderFromProvider(c, p)
-                                                    }
+                                                    onClick={() => orderFromProvider(c, p)}
                                                     className="rounded-xl border border-[var(--yinn-border)] px-4 py-2 text-xs font-extrabold"
                                                     disabled={!!orderingKey}
                                                   >

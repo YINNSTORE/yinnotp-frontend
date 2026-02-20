@@ -1,34 +1,42 @@
-import { NextResponse } from "next/server";
+export const runtime = "nodejs";
 
-const API_BASE =
-  process.env.API_BASE ||
-  process.env.NEXT_PUBLIC_API_BASE ||
-  "https://yinnhosting.serv00.net/api";
+function pickAuth(req) {
+  const h = req.headers.get("authorization");
+  return h ? { Authorization: h } : {};
+}
 
 export async function GET(req) {
   try {
-    const url = new URL(req.url);
-    const auth = req.headers.get("authorization") || "";
-    const qs = url.search || "";
+    const base = process.env.YINNOTP_BACKEND_BASE || "https://yinnhosting.serv00.net/api";
+    const { searchParams } = new URL(req.url);
 
-    const r = await fetch(`${API_BASE}/admin/users/list.php${qs}`, {
+    const limit = searchParams.get("limit") || "20";
+    const offset = searchParams.get("offset") || "0";
+    const q = searchParams.get("q") || "";
+
+    const url = new URL(`${base}/admin/users/list.php`);
+    url.searchParams.set("limit", limit);
+    url.searchParams.set("offset", offset);
+    if (q) url.searchParams.set("q", q);
+
+    const r = await fetch(url.toString(), {
       method: "GET",
       headers: {
-        "Content-Type": "application/json",
-        ...(auth ? { Authorization: auth } : {}),
+        "Accept": "application/json",
+        ...pickAuth(req),
       },
       cache: "no-store",
     });
 
     const text = await r.text();
-    return new NextResponse(text, {
+    return new Response(text, {
       status: r.status,
       headers: { "Content-Type": "application/json; charset=utf-8" },
     });
-  } catch {
-    return NextResponse.json(
-      { ok: false, message: "Server error" },
-      { status: 500 }
-    );
+  } catch (e) {
+    return new Response(JSON.stringify({ ok: false, message: "Proxy error" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
   }
 }

@@ -58,7 +58,6 @@ function msLabel(ms) {
   return `${Math.round(n)}ms`;
 }
 
-/** range warna (dipakai badge ms) */
 function msRange(ms) {
   const n = Number(ms);
   if (!Number.isFinite(n) || n <= 0) return "muted";
@@ -67,7 +66,6 @@ function msRange(ms) {
   return "bad";
 }
 
-/** FIX: ms dibungkus badge kayak "Online" */
 function MsBadge({ ms }) {
   const r = msRange(ms);
   const cls =
@@ -179,7 +177,7 @@ function flagUrlFromCountry(country) {
 }
 
 /* ================= Scroll Reveal (IntersectionObserver) ================= */
-
+/* FIX: bikin reveal bener-bener kerasa + smooth (inline style biar gak ke-purge) */
 function Reveal({ children, className = "" }) {
   const ref = useRef(null);
   const [inView, setInView] = useState(false);
@@ -197,7 +195,7 @@ function Reveal({ children, className = "" }) {
           }
         }
       },
-      { threshold: 0.18 }
+      { threshold: 0.16 }
     );
 
     obs.observe(el);
@@ -207,19 +205,19 @@ function Reveal({ children, className = "" }) {
   return (
     <div
       ref={ref}
-      className={cx(
-        "transform-gpu will-change-transform",
-        "transition-[transform,opacity] duration-300 ease-out",
-        inView ? "opacity-100 scale-100" : "opacity-0 scale-[0.9]",
-        className
-      )}
+      className={cx("will-change-transform", className)}
+      style={{
+        opacity: inView ? 1 : 0,
+        transform: inView ? "scale(1)" : "scale(0.8)",
+        transition: "transform 320ms ease-out, opacity 320ms ease-out",
+      }}
     >
       {children}
     </div>
   );
 }
 
-/* ================= FIX: Skeleton shimmer (kilauan bergerak + mengikuti layout) ================= */
+/* ================= Skeleton shimmer (kilauan bergerak + mengikuti layout) ================= */
 
 function Skel({ className = "" }) {
   return <div className={cx("yinn-skel", className)} />;
@@ -274,23 +272,91 @@ function SkeletonProviderRow() {
   );
 }
 
-/** Skeleton grid buat card "Aplikasi Populer" biar ikut struktur */
-function SkeletonPopularGrid() {
+/* FIX: boot loading ngikut layout struktur asli (tanpa teks) */
+function BootPageSkeleton() {
   return (
-    <div className="mt-2 grid grid-cols-3 gap-2">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div
-          key={i}
-          className="rounded-2xl border border-[var(--yinn-border)] p-3"
-        >
-          <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)]">
-            <Skel className="h-9 w-9 rounded-xl" />
+    <div className="mx-auto max-w-[520px] px-4 pt-4 pb-[calc(120px+env(safe-area-inset-bottom))]">
+      {/* top cards */}
+      <section className="grid grid-cols-2 gap-3">
+        <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
+          <div className="flex items-center gap-2">
+            <Skel className="h-7 w-20 rounded-full border border-[var(--yinn-border)]" />
+            <Skel className="ms-auto h-7 w-24 rounded-full border border-[var(--yinn-border)]" />
           </div>
-          <div className="mt-2">
-            <Skel className="mx-auto h-3 w-16 rounded-md" />
+          <div className="mt-3">
+            <Skel className="h-4 w-28 rounded-md" />
+            <div className="mt-2">
+              <Skel className="h-3 w-24 rounded-md" />
+            </div>
+          </div>
+          <div className="mt-4">
+            <Skel className="h-12 w-full rounded-2xl" />
           </div>
         </div>
-      ))}
+
+        <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
+          <Skel className="h-3 w-28 rounded-md" />
+          <div className="mt-2">
+            <Skel className="h-4 w-40 rounded-md" />
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Skel className="h-6 w-24 rounded-full" />
+            <Skel className="h-6 w-20 rounded-full" />
+            <Skel className="h-6 w-24 rounded-full" />
+          </div>
+          <div className="mt-4">
+            <Skel className="h-12 w-full rounded-2xl" />
+          </div>
+        </div>
+      </section>
+
+      {/* pending */}
+      <section className="mt-4 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
+        <div className="flex items-center justify-between">
+          <Skel className="h-4 w-32 rounded-md" />
+          <Skel className="h-10 w-10 rounded-xl border border-[var(--yinn-border)]" />
+        </div>
+        <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] p-6">
+          <div className="mx-auto grid max-w-[220px] gap-3">
+            <Skel className="h-4 w-40 rounded-md" />
+            <Skel className="h-3 w-52 rounded-md" />
+            <Skel className="mx-auto h-11 w-44 rounded-2xl" />
+          </div>
+        </div>
+      </section>
+
+      {/* bottom cards */}
+      <section className="mt-4 grid grid-cols-2 gap-3">
+        <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
+          <Skel className="h-4 w-24 rounded-md" />
+          <div className="mt-2">
+            <Skel className="h-3 w-40 rounded-md" />
+          </div>
+          <div className="mt-3 flex gap-2">
+            <Skel className="h-7 w-20 rounded-full" />
+            <Skel className="h-7 w-20 rounded-full" />
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Skel className="h-10 w-full rounded-xl" />
+            <Skel className="h-10 w-full rounded-xl" />
+          </div>
+          <div className="mt-3">
+            <Skel className="h-16 w-full rounded-2xl border border-[var(--yinn-border)]" />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
+          <Skel className="h-4 w-28 rounded-md" />
+          <div className="mt-2">
+            <Skel className="h-3 w-44 rounded-md" />
+          </div>
+          <div className="mt-3 grid gap-2">
+            <Skel className="h-16 w-full rounded-2xl border border-[var(--yinn-border)]" />
+            <Skel className="h-16 w-full rounded-2xl border border-[var(--yinn-border)]" />
+            <Skel className="h-16 w-full rounded-2xl border border-[var(--yinn-border)]" />
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -299,23 +365,8 @@ function FullscreenBoot({ show }) {
   if (!show) return null;
   return (
     <div className="fixed inset-0 z-[90] bg-[var(--yinn-bg)]">
-      <div className="mx-auto max-w-[520px] px-4 pt-5">
-        <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
-          <div className="text-sm font-extrabold">Loading YinnOTP…</div>
-          <div className="mt-2 text-xs text-[var(--yinn-muted)]">
-            Mengambil layanan & status server
-          </div>
-
-          {/* ikut struktur list layanan */}
-          <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
-            <div className="divide-y divide-[var(--yinn-border)]">
-              <SkeletonRowApp />
-              <SkeletonRowApp />
-              <SkeletonRowApp />
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* FIX #1 + #2: gak ada teks, skeleton full layout */}
+      <BootPageSkeleton />
     </div>
   );
 }
@@ -360,7 +411,7 @@ function Modal({ open, onClose, title, subtitle, children }) {
           </div>
         </div>
 
-        {/* FIX: scroll lebih smooth (momentum + perf) */}
+        {/* FIX #3: scroll modal bener-bener halus (momentum) */}
         <div
           className="px-4 pb-[calc(16px+env(safe-area-inset-bottom))] yinn-smoothscroll"
           style={{
@@ -424,6 +475,15 @@ export default function OrderPage() {
   const [activeOrder, setActiveOrder] = useState(null);
   const [polling, setPolling] = useState(false);
   const pollRef = useRef(null);
+
+  /* FIX #4: pas buka "Buat Pesanan" selalu ada loading animasi sebentar (ikut skeleton script) */
+  const [modalKickLoading, setModalKickLoading] = useState(false);
+  const modalKickRef = useRef(null);
+  function kickModalLoading(ms = 450) {
+    setModalKickLoading(true);
+    if (modalKickRef.current) clearTimeout(modalKickRef.current);
+    modalKickRef.current = setTimeout(() => setModalKickLoading(false), ms);
+  }
 
   const pickedService = useMemo(() => {
     return (
@@ -548,7 +608,8 @@ export default function OrderPage() {
       return;
     }
 
-    const ok = currentPerm === "granted" ? true : await requestNotificationPermission();
+    const ok =
+      currentPerm === "granted" ? true : await requestNotificationPermission();
     if (!ok) {
       toast.error("Notifikasi tidak diizinkan");
       setNotifEnabled(false);
@@ -802,6 +863,7 @@ export default function OrderPage() {
     setServiceSearch("");
     setCountrySearch("");
     setExpandedCountryId("");
+    kickModalLoading(); // FIX #4
   }
 
   function selectServiceAndGoCountries(svc) {
@@ -812,6 +874,8 @@ export default function OrderPage() {
     setCountrySearch("");
     setExpandedCountryId("");
     setBuyStep("country");
+
+    kickModalLoading(); // FIX #4
     loadCountriesForService(sid);
   }
 
@@ -840,6 +904,7 @@ export default function OrderPage() {
       alive = false;
       clearInterval(t);
       stopPolling();
+      if (modalKickRef.current) clearTimeout(modalKickRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -857,6 +922,9 @@ export default function OrderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeOrder?.order_id]);
 
+  const showAppLoading = loadingServices || modalKickLoading;
+  const showCountryLoading = loadingCountries || modalKickLoading;
+
   /* ================= render ================= */
 
   return (
@@ -873,7 +941,7 @@ export default function OrderPage() {
           -webkit-tap-highlight-color: transparent;
         }
 
-        /* ===== Skeleton shimmer: kelihatan & bergerak (kilauan) ===== */
+        /* Skeleton shimmer (kilauan bergerak) */
         .yinn-skel {
           position: relative;
           overflow: hidden;
@@ -912,17 +980,11 @@ export default function OrderPage() {
           }
         }
 
-        /* ===== Scroll lebih smooth + ringan ===== */
+        /* Smooth scroll */
         .yinn-smoothscroll {
           scroll-behavior: smooth;
           -webkit-overflow-scrolling: touch;
           overscroll-behavior: contain;
-          will-change: scroll-position;
-        }
-        /* Biar list pas panjang gak nge-lag (Chrome mendukung) */
-        .yinn-listperf > * {
-          content-visibility: auto;
-          contain-intrinsic-size: 72px;
         }
       `}</style>
 
@@ -1191,8 +1253,16 @@ export default function OrderPage() {
                 className="rounded-xl border border-[var(--yinn-border)] py-2 text-sm font-extrabold"
                 onClick={() => {
                   updateNotifStateFromBrowser();
-                  if (notifState === "unsupported") toast.error("Browser tidak support notifikasi");
-                  else toast.success(`Status: ${typeof Notification !== "undefined" ? Notification.permission : notifState}`);
+                  if (notifState === "unsupported")
+                    toast.error("Browser tidak support notifikasi");
+                  else
+                    toast.success(
+                      `Status: ${
+                        typeof Notification !== "undefined"
+                          ? Notification.permission
+                          : notifState
+                      }`
+                    );
                 }}
               >
                 Cek
@@ -1274,6 +1344,7 @@ export default function OrderPage() {
                 setBuyStep("app");
                 setCountrySearch("");
                 setExpandedCountryId("");
+                kickModalLoading(); // biar saat balik ada animasi loading halus juga
               }}
               className="inline-flex items-center gap-2 rounded-xl border border-[var(--yinn-border)] px-3 py-2 text-xs font-extrabold"
             >
@@ -1292,7 +1363,7 @@ export default function OrderPage() {
                 onChange={(e) => setServiceSearch(e.target.value)}
                 placeholder="Cari nama aplikasi..."
                 className="w-full bg-transparent py-2 text-sm outline-none"
-                disabled={loadingServices}
+                disabled={showAppLoading}
               />
             </div>
 
@@ -1300,11 +1371,25 @@ export default function OrderPage() {
               Aplikasi Populer
             </div>
 
-            {/* FIX: kalau services lagi load, popular juga tampil skeleton yang sesuai struktur */}
-            {loadingServices ? (
-              <SkeletonPopularGrid />
+            {/* skeleton popular ikut struktur */}
+            {showAppLoading ? (
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="rounded-2xl border border-[var(--yinn-border)] p-3"
+                  >
+                    <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-[var(--yinn-border)]">
+                      <Skel className="h-9 w-9 rounded-xl" />
+                    </div>
+                    <div className="mt-2">
+                      <Skel className="mx-auto h-3 w-16 rounded-md" />
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : (
-              <div className="mt-2 grid grid-cols-3 gap-2 yinn-listperf">
+              <div className="mt-2 grid grid-cols-3 gap-2">
                 {popularResolved.map((p) => (
                   <Reveal key={String(p.svc?.service_code)}>
                     <button
@@ -1332,14 +1417,14 @@ export default function OrderPage() {
             )}
 
             <div className="mt-3 overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
-              {loadingServices ? (
+              {showAppLoading ? (
                 <div className="divide-y divide-[var(--yinn-border)]">
                   {Array.from({ length: 8 }).map((_, i) => (
                     <SkeletonRowApp key={i} />
                   ))}
                 </div>
               ) : (
-                <div className="divide-y divide-[var(--yinn-border)] yinn-listperf">
+                <div className="divide-y divide-[var(--yinn-border)]">
                   {filteredServices.map((s) => (
                     <Reveal key={String(s?.service_code)}>
                       <button
@@ -1410,7 +1495,10 @@ export default function OrderPage() {
                 </div>
 
                 <button
-                  onClick={() => setBuyStep("app")}
+                  onClick={() => {
+                    setBuyStep("app");
+                    kickModalLoading();
+                  }}
                   className="rounded-xl border border-[var(--yinn-border)] px-3 py-2 text-xs font-extrabold"
                 >
                   Ganti
@@ -1425,7 +1513,7 @@ export default function OrderPage() {
                 onChange={(e) => setCountrySearch(e.target.value)}
                 placeholder="Cari nama negara..."
                 className="w-full bg-transparent py-2 text-sm outline-none"
-                disabled={!serviceId || loadingCountries}
+                disabled={!serviceId || showCountryLoading}
               />
             </div>
 
@@ -1459,7 +1547,7 @@ export default function OrderPage() {
                 <div className="rounded-2xl border border-[var(--yinn-border)] p-4 text-sm text-[var(--yinn-muted)]">
                   Pilih aplikasi dulu.
                 </div>
-              ) : loadingCountries ? (
+              ) : showCountryLoading ? (
                 <div className="overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
                   <div className="divide-y divide-[var(--yinn-border)]">
                     {Array.from({ length: 8 }).map((_, i) => (
@@ -1469,11 +1557,14 @@ export default function OrderPage() {
                 </div>
               ) : (
                 <div className="rounded-2xl border border-[var(--yinn-border)]">
-                  <div className="divide-y divide-[var(--yinn-border)] yinn-listperf">
+                  <div className="divide-y divide-[var(--yinn-border)]">
                     {filteredCountries.map((c) => {
-                      const open = String(expandedCountryId) === String(c?.number_id);
+                      const open =
+                        String(expandedCountryId) === String(c?.number_id);
                       const minp = minPriceFromCountry(c);
-                      const pricelist = Array.isArray(c?.pricelist) ? c.pricelist : [];
+                      const pricelist = Array.isArray(c?.pricelist)
+                        ? c.pricelist
+                        : [];
                       const flagUrl = flagUrlFromCountry(c);
                       const stock = realStockFromCountry(c);
 
@@ -1483,7 +1574,9 @@ export default function OrderPage() {
                             <button
                               className="flex w-full items-center gap-3 p-3 text-left hover:bg-black/5 dark:hover:bg-white/5"
                               onClick={() => {
-                                setExpandedCountryId(open ? "" : String(c?.number_id || ""));
+                                setExpandedCountryId(
+                                  open ? "" : String(c?.number_id || "")
+                                );
                               }}
                             >
                               <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
@@ -1505,7 +1598,9 @@ export default function OrderPage() {
                                 </div>
                                 <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-[var(--yinn-muted)]">
                                   <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                                    {c?.prefix ? `+${String(c.prefix).replace("+", "")}` : "—"}
+                                    {c?.prefix
+                                      ? `+${String(c.prefix).replace("+", "")}`
+                                      : "—"}
                                   </span>
                                   <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
                                     {c?.short ? String(c.short) : "—"}
@@ -1514,7 +1609,8 @@ export default function OrderPage() {
                                     Stok {stock || 0}
                                   </span>
                                   <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                                    Mulai {minp ? formatIDR(applyMarkup(minp)) : "—"}
+                                    Mulai{" "}
+                                    {minp ? formatIDR(applyMarkup(minp)) : "—"}
                                   </span>
                                 </div>
                               </div>
@@ -1537,9 +1633,8 @@ export default function OrderPage() {
                                 </div>
                               ) : (
                                 <div className="overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
-                                  <div className="divide-y divide-[var(--yinn-border)] yinn-listperf">
-                                    {/* kalau lagi order, tampilkan skeleton provider yang sesuai struktur */}
-                                    {orderingKey ? (
+                                  <div className="divide-y divide-[var(--yinn-border)]">
+                                    {modalKickLoading ? (
                                       <>
                                         <SkeletonProviderRow />
                                         <SkeletonProviderRow />
@@ -1547,14 +1642,22 @@ export default function OrderPage() {
                                     ) : null}
 
                                     {pricelist
-                                      .filter((p) => String(p?.provider_id || "").trim())
+                                      .filter((p) =>
+                                        String(p?.provider_id || "").trim()
+                                      )
                                       .map((p) => {
                                         const pid = String(p?.provider_id || "");
-                                        const key = `${String(c?.number_id || "")}-${pid}`;
+                                        const key = `${String(
+                                          c?.number_id || ""
+                                        )}-${pid}`;
                                         const loading = orderingKey === key;
 
-                                        const serverText = String(p?.server || p?.server_id || "").trim();
-                                        const serverLabel = serverText ? `Server ${serverText}` : "Server";
+                                        const serverText = String(
+                                          p?.server || p?.server_id || ""
+                                        ).trim();
+                                        const serverLabel = serverText
+                                          ? `Server ${serverText}`
+                                          : "Server";
 
                                         const base = safeNum(p?.price);
                                         const sell = applyMarkup(base);
@@ -1589,7 +1692,9 @@ export default function OrderPage() {
                                                     {formatIDR(sell)}
                                                   </div>
                                                   <button
-                                                    onClick={() => orderFromProvider(c, p)}
+                                                    onClick={() =>
+                                                      orderFromProvider(c, p)
+                                                    }
                                                     className="rounded-xl border border-[var(--yinn-border)] px-4 py-2 text-xs font-extrabold"
                                                     disabled={!!orderingKey}
                                                   >

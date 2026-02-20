@@ -14,6 +14,8 @@ import {
   ChevronRight,
   X,
   ChevronLeft,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import {
   ping,
@@ -75,11 +77,27 @@ function isFinalStatus(v) {
   );
 }
 
+function safeNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function minPriceFromCountry(country) {
   const list = Array.isArray(country?.pricelist) ? country.pricelist : [];
-  const prices = list.map((p) => Number(p?.price || 0)).filter((x) => x > 0);
+  const prices = list.map((p) => safeNum(p?.price)).filter((x) => x > 0);
   if (!prices.length) return 0;
   return Math.min(...prices);
+}
+
+function realStockFromCountry(country) {
+  // jangan “100 rata” kalau API ngasih field aneh:
+  // prioritas: stock_total; fallback: sum pricelist.stock; fallback: 0
+  const st = safeNum(country?.stock_total);
+  if (st > 0) return st;
+
+  const list = Array.isArray(country?.pricelist) ? country.pricelist : [];
+  const sum = list.reduce((acc, p) => acc + safeNum(p?.stock), 0);
+  return sum > 0 ? sum : 0;
 }
 
 function applyMarkup(price) {
@@ -91,11 +109,16 @@ function applyMarkup(price) {
 /* ================= flags ================= */
 
 function flagCodeForCountry(country) {
-  const shortRaw = String(country?.short || country?.code || country?.iso || country?.iso2 || "").trim();
+  const shortRaw = String(
+    country?.short || country?.code || country?.iso || country?.iso2 || ""
+  ).trim();
   const nameNorm = normalizeName(country?.name);
 
   // Special: United States (virtual)
-  if (nameNorm.includes("virtual") && (shortRaw.toLowerCase() === "us" || nameNorm.includes("united states"))) {
+  if (
+    nameNorm.includes("virtual") &&
+    (shortRaw.toLowerCase() === "us" || nameNorm.includes("united states"))
+  ) {
     return "uv";
   }
 
@@ -109,19 +132,19 @@ function flagCodeForCountry(country) {
   if (EXCEPT[iso2]) return EXCEPT[iso2];
   if (iso2) return iso2;
 
-  // If no iso, try detect from name (fallback, minimal)
+  // fallback minimal
   if (nameNorm.includes("indonesia")) return "id";
   if (nameNorm.includes("philippines")) return "ph";
   if (nameNorm.includes("malaysia")) return "my";
   if (nameNorm.includes("thailand")) return "th";
   if (nameNorm.includes("colombia")) return "co";
-
   return "";
 }
 
 function flagUrlFromCountry(country) {
-  const direct =
-    String(country?.flag_img || country?.flag_url || country?.img || country?.image || "").trim();
+  const direct = String(
+    country?.flag_img || country?.flag_url || country?.img || country?.image || ""
+  ).trim();
   if (direct) return direct;
 
   const code = flagCodeForCountry(country);
@@ -141,7 +164,6 @@ function HoloBlock({ className = "" }) {
       style={{ boxShadow: "var(--yinn-soft)" }}
     >
       <div className="yinn-holo absolute inset-0" />
-      <div className="yinn-holo2 absolute inset-0" />
     </div>
   );
 }
@@ -149,9 +171,29 @@ function HoloBlock({ className = "" }) {
 function HoloOverlay() {
   return (
     <div className="absolute inset-0 z-10 overflow-hidden rounded-2xl">
-      <div className="absolute inset-0 bg-[var(--yinn-surface)] opacity-60" />
+      <div className="absolute inset-0 bg-[var(--yinn-surface)] opacity-65" />
       <div className="yinn-holo absolute inset-0" />
-      <div className="yinn-holo2 absolute inset-0" />
+    </div>
+  );
+}
+
+function FullscreenBoot({ show }) {
+  if (!show) return null;
+  return (
+    <div className="fixed inset-0 z-[90] bg-[var(--yinn-bg)]">
+      <div className="mx-auto max-w-[520px] px-4 pt-5">
+        <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
+          <div className="text-sm font-extrabold">Loading YinnOTP…</div>
+          <div className="mt-2 text-xs text-[var(--yinn-muted)]">
+            Mengambil layanan & status server
+          </div>
+          <div className="mt-4 grid gap-2">
+            <HoloBlock className="h-14" />
+            <HoloBlock className="h-14" />
+            <HoloBlock className="h-14" />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -170,14 +212,20 @@ function Modal({ open, onClose, title, subtitle, children }) {
 
   return (
     <div className="fixed inset-0 z-[80]">
-      <button className="absolute inset-0 bg-black/35" onClick={onClose} aria-label="Tutup" />
+      <button
+        className="absolute inset-0 bg-black/35"
+        onClick={onClose}
+        aria-label="Tutup"
+      />
       <div className="absolute bottom-0 left-0 right-0 mx-auto w-full max-w-[520px] rounded-t-3xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] shadow-[0_-20px_60px_rgba(0,0,0,0.25)]">
         <div className="p-4">
           <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-black/10 dark:bg-white/10" />
           <div className="mb-3 flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="truncate text-base font-extrabold">{title}</div>
-              <div className="truncate text-xs text-[var(--yinn-muted)]">{subtitle}</div>
+              <div className="truncate text-xs text-[var(--yinn-muted)]">
+                {subtitle}
+              </div>
             </div>
             <button
               className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)]"
@@ -218,20 +266,25 @@ const POPULAR_APPS = [
   { name: "DANA", img: "https://assets.rumahotp.com/apps/fr.png" },
 ];
 
-/* ================= page ================= */
-
 export default function OrderPage() {
+  const [bootLoading, setBootLoading] = useState(true);
+
   const [online, setOnline] = useState(false);
   const [checking, setChecking] = useState(false);
   const [latencyMs, setLatencyMs] = useState(null);
   const [lastPingTs, setLastPingTs] = useState(0);
   const [ago, setAgo] = useState(0);
 
+  // notifikasi realtime (Browser Notification)
+  const [notifEnabled, setNotifEnabled] = useState(false);
+  const [notifState, setNotifState] = useState("unsupported"); // unsupported | default | granted | denied
+  const lastNotifiedOtpRef = useRef("");
+
   // modal
   const [openBuy, setOpenBuy] = useState(false);
   const [buyStep, setBuyStep] = useState("app"); // app | country
 
-  // services (apps)
+  // services
   const [services, setServices] = useState([]);
   const [loadingServices, setLoadingServices] = useState(false);
   const [serviceSearch, setServiceSearch] = useState("");
@@ -251,19 +304,26 @@ export default function OrderPage() {
   const pollRef = useRef(null);
 
   const pickedService = useMemo(() => {
-    return services.find((x) => String(x?.service_code) === String(serviceId)) || null;
+    return (
+      services.find((x) => String(x?.service_code) === String(serviceId)) || null
+    );
   }, [services, serviceId]);
 
   const popularResolved = useMemo(() => {
     const map = new Map();
     for (const s of services) map.set(normalizeName(s?.service_name), s);
-    return POPULAR_APPS.map((p) => ({ ...p, svc: map.get(normalizeName(p.name)) })).filter((x) => x.svc);
+    return POPULAR_APPS.map((p) => ({
+      ...p,
+      svc: map.get(normalizeName(p.name)),
+    })).filter((x) => x.svc);
   }, [services]);
 
   const filteredServices = useMemo(() => {
     const q = normalizeName(serviceSearch);
     if (!q) return services;
-    return services.filter((s) => normalizeName(s?.service_name).includes(q));
+    return services.filter((s) =>
+      normalizeName(s?.service_name).includes(q)
+    );
   }, [services, serviceSearch]);
 
   const filteredCountries = useMemo(() => {
@@ -271,11 +331,14 @@ export default function OrderPage() {
     let list = countries.slice();
 
     if (sortMode === "harga") {
-      list.sort((a, b) => (minPriceFromCountry(a) || 0) - (minPriceFromCountry(b) || 0));
+      list.sort(
+        (a, b) =>
+          (minPriceFromCountry(a) || 0) - (minPriceFromCountry(b) || 0)
+      );
     } else {
       list.sort((a, b) => {
-        const sa = Number(a?.stock_total || 0);
-        const sb = Number(b?.stock_total || 0);
+        const sa = safeNum(a?.stock_total);
+        const sb = safeNum(b?.stock_total);
         if (sb !== sa) return sb - sa;
         return (minPriceFromCountry(a) || 0) - (minPriceFromCountry(b) || 0);
       });
@@ -287,9 +350,58 @@ export default function OrderPage() {
 
   const pickedServiceLogo = useMemo(() => {
     if (pickedService?.service_img) return pickedService.service_img;
-    const hit = POPULAR_APPS.find((p) => normalizeName(p.name) === normalizeName(pickedService?.service_name));
+    const hit = POPULAR_APPS.find(
+      (p) => normalizeName(p.name) === normalizeName(pickedService?.service_name)
+    );
     return hit?.img || "";
   }, [pickedService]);
+
+  function updateNotifStateFromBrowser() {
+    if (typeof window === "undefined") return;
+    if (!("Notification" in window)) {
+      setNotifState("unsupported");
+      setNotifEnabled(false);
+      return;
+    }
+    const p = Notification.permission; // default/granted/denied
+    setNotifState(p);
+    setNotifEnabled(p === "granted");
+  }
+
+  async function enableNotification() {
+    if (typeof window === "undefined") return;
+    if (!("Notification" in window)) {
+      toast.error("Browser tidak support notifikasi");
+      return;
+    }
+    try {
+      const p = await Notification.requestPermission();
+      setNotifState(p);
+      setNotifEnabled(p === "granted");
+      if (p === "granted") toast.success("Notifikasi aktif");
+      else toast.error("Notifikasi ditolak");
+    } catch {
+      toast.error("Gagal minta izin notifikasi");
+    }
+  }
+
+  function fireOtpNotification(otp, phone) {
+    if (!notifEnabled) return;
+    if (!otp || otp === "-" || otp === "—") return;
+
+    const key = `${phone || ""}:${otp}`;
+    if (lastNotifiedOtpRef.current === key) return;
+    lastNotifiedOtpRef.current = key;
+
+    try {
+      new Notification("YinnOTP • OTP Masuk", {
+        body: phone ? `Nomor: ${phone}\nOTP: ${otp}` : `OTP: ${otp}`,
+        silent: false,
+      });
+    } catch {
+      // ignore
+    }
+  }
 
   async function refreshPing() {
     setChecking(true);
@@ -370,7 +482,10 @@ export default function OrderPage() {
 
     const first = await pollOnce(order_id);
     if (first) {
-      setActiveOrder((o) => (o ? { ...o, status: first.status, otp_code: first.otp_code } : o));
+      setActiveOrder((o) =>
+        o ? { ...o, status: first.status, otp_code: first.otp_code } : o
+      );
+
       activityAdd({
         type: "order_status",
         order_id,
@@ -378,6 +493,11 @@ export default function OrderPage() {
         otp_code: first.otp_code,
         ts: Date.now(),
       });
+
+      if (String(first.otp_code || "").trim()) {
+        fireOtpNotification(first.otp_code, activeOrder?.phone_number);
+      }
+
       if (isFinalStatus(first.status)) {
         stopPolling();
         return;
@@ -390,7 +510,13 @@ export default function OrderPage() {
 
       setActiveOrder((o) => {
         if (!o) return o;
-        return { ...o, status: data.status, otp_code: data.otp_code };
+        const next = { ...o, status: data.status, otp_code: data.otp_code };
+
+        // notif realtime OTP
+        if (String(data?.otp_code || "").trim()) {
+          fireOtpNotification(data.otp_code, next.phone_number);
+        }
+        return next;
       });
 
       activityAdd({
@@ -402,7 +528,7 @@ export default function OrderPage() {
       });
 
       if (isFinalStatus(data.status)) stopPolling();
-    }, 2000);
+    }, 1800);
   }
 
   async function setStatus(action) {
@@ -432,10 +558,10 @@ export default function OrderPage() {
     setOrderingKey(key);
 
     try {
-      // Provider -> Operators (ambil operator pertama biar flow sama RumahOTP)
+      // FIX “gagal load provider”: pastikan operator kebaca & ada
       const opRes = await roOperators(countryName, pid);
       if (!opRes.ok || !opRes.json?.status) {
-        toast.error("Gagal load provider/operator");
+        toast.error("Gagal load operator");
         return;
       }
 
@@ -458,7 +584,7 @@ export default function OrderPage() {
         return;
       }
 
-      const basePrice = Number(data.price || provider?.price || 0) || 0;
+      const basePrice = safeNum(data.price || provider?.price);
       const sellPrice = applyMarkup(basePrice);
 
       const row = {
@@ -516,14 +642,23 @@ export default function OrderPage() {
     loadCountriesForService(sid);
   }
 
-  /* ================= effects ================= */
+/* ================= effects ================= */
 
   useEffect(() => {
-    refreshPing();
-    loadServices();
+    updateNotifStateFromBrowser();
+
+    let alive = true;
+
+    (async () => {
+      setBootLoading(true);
+      await Promise.allSettled([refreshPing(), loadServices()]);
+      if (!alive) return;
+      setBootLoading(false);
+    })();
 
     const t = setInterval(() => refreshPing(), 5000);
     return () => {
+      alive = false;
       clearInterval(t);
       stopPolling();
     };
@@ -538,49 +673,51 @@ export default function OrderPage() {
     return () => clearInterval(id);
   }, [lastPingTs]);
 
+  // auto lanjut polling kalau refresh & ada activeOrder
+  useEffect(() => {
+    if (activeOrder?.order_id) startPolling(activeOrder.order_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeOrder?.order_id]);
+
   /* ================= render ================= */
 
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
       <Toaster position="top-right" />
 
+      <FullscreenBoot show={bootLoading} />
+
       <style jsx global>{`
-        html {
+        html,
+        body {
           scroll-behavior: smooth;
         }
-        /* hologram shimmer */
+        /* bikin scroll “halus” + momentum */
+        * {
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        /* HOLOGRAM SHINY (putih mengkilap, tanpa warna) */
         .yinn-holo {
           background: linear-gradient(
             110deg,
-            rgba(0, 255, 255, 0) 0%,
-            rgba(0, 255, 255, 0.12) 18%,
-            rgba(255, 0, 255, 0.16) 40%,
-            rgba(0, 255, 255, 0.12) 62%,
-            rgba(0, 255, 255, 0) 100%
-          );
-          transform: translateX(-120%);
-          animation: yinnHoloMove 1.05s ease-in-out infinite;
-          filter: blur(0.2px);
-          opacity: 0.9;
-        }
-        .yinn-holo2 {
-          background: linear-gradient(
-            110deg,
             rgba(255, 255, 255, 0) 0%,
-            rgba(255, 255, 255, 0.12) 30%,
-            rgba(255, 255, 255, 0) 60%
+            rgba(255, 255, 255, 0.10) 30%,
+            rgba(255, 255, 255, 0.26) 45%,
+            rgba(255, 255, 255, 0.10) 60%,
+            rgba(255, 255, 255, 0) 100%
           );
-          transform: translateX(-120%);
-          animation: yinnHoloMove 1.35s ease-in-out infinite;
-          mix-blend-mode: overlay;
-          opacity: 0.8;
+          transform: translateX(-130%);
+          animation: yinnHoloMove 1.05s ease-in-out infinite;
+          filter: blur(0.3px);
+          opacity: 0.95;
         }
         @keyframes yinnHoloMove {
           0% {
-            transform: translateX(-120%);
+            transform: translateX(-130%);
           }
           100% {
-            transform: translateX(120%);
+            transform: translateX(130%);
           }
         }
       `}</style>
@@ -598,9 +735,12 @@ export default function OrderPage() {
           </Link>
 
           <div className="min-w-0">
-            <div className="truncate text-sm font-extrabold leading-tight">Order</div>
+            <div className="truncate text-sm font-extrabold leading-tight">
+              Order
+            </div>
             <div className="truncate text-[11px] text-[var(--yinn-muted)]">
-              {checking ? "checking..." : online ? "online" : "offline"} • {msLabel(latencyMs)} • update {ago}s lalu
+              {checking ? "checking..." : online ? "online" : "offline"} •{" "}
+              {msLabel(latencyMs)} • update {ago}s lalu
             </div>
           </div>
 
@@ -619,7 +759,7 @@ export default function OrderPage() {
       </header>
 
       <main className="mx-auto max-w-[520px] px-4 pt-4 pb-[calc(120px+env(safe-area-inset-bottom))]">
-        {/* top cards (layout sama seperti RumahOTP, versi YinnOTP tanpa saldo rumahotp) */}
+        {/* top cards (mirip flow RumahOTP, versi YinnOTP tanpa saldo) */}
         <section className="grid grid-cols-2 gap-3">
           <div
             className="rounded-2xl border p-4"
@@ -635,22 +775,40 @@ export default function OrderPage() {
                   "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-extrabold",
                   online
                     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
-                    : "border-rose-500/30 bg-rose-500/10 text-rose-600"
+                    : "border-zinc-500/30 bg-zinc-500/10 text-zinc-600"
                 )}
               >
                 {online ? <SignalHigh size={14} /> : <SignalLow size={14} />}
                 {online ? "Online" : "Offline"}
               </div>
+
+              <div
+                className={cx(
+                  "ms-auto inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-extrabold",
+                  notifEnabled
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
+                    : "border-zinc-500/30 bg-zinc-500/10 text-zinc-600"
+                )}
+                title="Notifikasi real-time"
+              >
+                {notifEnabled ? <Bell size={14} /> : <BellOff size={14} />}
+                {notifEnabled ? "Notif ON" : "Notif OFF"}
+              </div>
             </div>
 
-            <div className="mt-3 text-sm font-extrabold">{msLabel(latencyMs)} response server</div>
-            <div className="mt-1 text-xs text-[var(--yinn-muted)]">Auto update tanpa refresh.</div>
+            <div className="mt-3 text-sm font-extrabold">
+              {msLabel(latencyMs)} response server
+            </div>
+            <div className="mt-1 text-xs text-[var(--yinn-muted)]">
+              Auto update tanpa refresh.
+            </div>
 
             <button
               onClick={openBuyModal}
               className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-sm font-extrabold text-white"
               style={{
-                background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                background:
+                  "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
               }}
             >
               + Buat Pesanan
@@ -663,11 +821,14 @@ export default function OrderPage() {
             style={{
               borderColor: "var(--yinn-border)",
               boxShadow: "var(--yinn-soft)",
-              background: "linear-gradient(135deg, rgba(255,122,0,0.95), rgba(155,81,224,0.95))",
+              background:
+                "linear-gradient(135deg, rgba(255,122,0,0.95), rgba(155,81,224,0.95))",
             }}
           >
             <div className="text-xs font-bold opacity-90">Get Virtual Number</div>
-            <div className="mt-1 text-sm font-extrabold">OTP untuk banyak aplikasi</div>
+            <div className="mt-1 text-sm font-extrabold">
+              OTP untuk banyak aplikasi
+            </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {popularResolved.slice(0, 5).map((p) => (
@@ -675,7 +836,12 @@ export default function OrderPage() {
                   key={p.name}
                   className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-extrabold"
                 >
-                  <img src={p.img} alt={p.name} className="h-4 w-4 rounded-sm" loading="lazy" />
+                  <img
+                    src={p.img}
+                    alt={p.name}
+                    className="h-4 w-4 rounded-sm"
+                    loading="lazy"
+                  />
                   {p.name}
                 </div>
               ))}
@@ -703,7 +869,9 @@ export default function OrderPage() {
           <div className="flex items-center justify-between">
             <div className="text-sm font-extrabold">Pesanan Pending</div>
             <button
-              onClick={() => activeOrder?.order_id && startPolling(activeOrder.order_id)}
+              onClick={() =>
+                activeOrder?.order_id && startPolling(activeOrder.order_id)
+              }
               className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)]"
               aria-label="Sync order"
               title="Sync"
@@ -715,18 +883,38 @@ export default function OrderPage() {
           {activeOrder ? (
             <div className="mt-3 grid gap-3">
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="text-xs font-bold text-[var(--yinn-muted)]">STATUS</div>
-                <div className="mt-1 text-sm font-extrabold">{statusLabel(activeOrder.status)}</div>
+                <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                  STATUS
+                </div>
+                <div className="mt-1 text-sm font-extrabold">
+                  {statusLabel(activeOrder.status)}
+                </div>
               </div>
 
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="text-xs font-bold text-[var(--yinn-muted)]">PHONE</div>
-                <div className="mt-1 text-sm font-extrabold break-all">{activeOrder.phone_number || "—"}</div>
+                <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                  PHONE
+                </div>
+                <div className="mt-1 text-sm font-extrabold break-all">
+                  {activeOrder.phone_number || "—"}
+                </div>
               </div>
 
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="text-xs font-bold text-[var(--yinn-muted)]">OTP</div>
-                <div className="mt-1 text-lg font-extrabold break-all">{activeOrder.otp_code || "-"}</div>
+                <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                  OTP
+                </div>
+                <div className="mt-1 text-lg font-extrabold break-all">
+                  {activeOrder.otp_code || "-"}
+                </div>
+                {!notifEnabled && notifState !== "unsupported" ? (
+                  <button
+                    onClick={enableNotification}
+                    className="mt-3 inline-flex items-center gap-2 rounded-xl border border-[var(--yinn-border)] px-3 py-2 text-xs font-extrabold"
+                  >
+                    <Bell size={16} /> Aktifkan Notif Real-time
+                  </button>
+                ) : null}
               </div>
 
               <div className="grid grid-cols-3 gap-2">
@@ -753,12 +941,15 @@ export default function OrderPage() {
           ) : (
             <div className="mt-4 grid place-items-center rounded-2xl border border-[var(--yinn-border)] p-6 text-center">
               <div className="text-sm font-extrabold">Tidak ada pesanan</div>
-              <div className="mt-1 text-xs text-[var(--yinn-muted)]">Pesanan aktif akan muncul di sini</div>
+              <div className="mt-1 text-xs text-[var(--yinn-muted)]">
+                Pesanan aktif akan muncul di sini
+              </div>
               <button
                 onClick={openBuyModal}
                 className="mt-4 inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-extrabold text-white"
                 style={{
-                  background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                  background:
+                    "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
                 }}
               >
                 + Buat Pesanan
@@ -767,7 +958,7 @@ export default function OrderPage() {
           )}
         </section>
 
-        {/* bottom cards: Notifikasi + Pertanyaan Umum (ada keterangannya) */}
+        {/* bottom cards: Notifikasi + Pertanyaan Umum */}
         <section className="mt-4 grid grid-cols-2 gap-3">
           <div
             className="rounded-2xl border p-4"
@@ -779,12 +970,19 @@ export default function OrderPage() {
           >
             <div className="text-sm font-extrabold">Notifikasi</div>
             <div className="mt-1 text-xs text-[var(--yinn-muted)]">
-              Disarankan aktifkan notifikasi real-time agar OTP masuk tepat waktu.
+              Aktifkan agar OTP masuk langsung muncul (real-time).
             </div>
 
             <div className="mt-3 flex items-center gap-2">
-              <div className="rounded-full border border-[var(--yinn-border)] px-3 py-1 text-xs font-extrabold text-[var(--yinn-muted)]">
-                Tidak Aktif
+              <div
+                className={cx(
+                  "rounded-full border px-3 py-1 text-xs font-extrabold",
+                  notifEnabled
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
+                    : "border-zinc-500/30 bg-zinc-500/10 text-zinc-600"
+                )}
+              >
+                {notifEnabled ? "Aktif" : "Tidak Aktif"}
               </div>
               <div className="rounded-full border border-[var(--yinn-border)] px-3 py-1 text-xs font-extrabold text-[var(--yinn-muted)]">
                 Browser
@@ -792,21 +990,27 @@ export default function OrderPage() {
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <button className="rounded-xl border border-[var(--yinn-border)] py-2 text-sm font-extrabold">
-                Browser
+              <button
+                className="rounded-xl border border-[var(--yinn-border)] py-2 text-sm font-extrabold"
+                onClick={updateNotifStateFromBrowser}
+              >
+                Cek
               </button>
               <button
-                className="rounded-xl py-2 text-sm font-extrabold text-white"
+                className="rounded-xl py-2 text-sm font-extrabold text-white disabled:opacity-60"
                 style={{
-                  background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                  background:
+                    "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
                 }}
+                onClick={enableNotification}
+                disabled={notifState === "denied" || notifState === "unsupported"}
               >
                 Aktifkan
               </button>
             </div>
 
             <div className="mt-3 rounded-2xl border border-[var(--yinn-border)] p-3 text-xs text-[var(--yinn-muted)]">
-              Notifikasi real-time akan tetap jalan walaupun tab ditutup saat daftar nomor.
+              Kalau permission “Denied”, ubah izin notifikasi di setting browser.
             </div>
           </div>
 
@@ -820,26 +1024,26 @@ export default function OrderPage() {
           >
             <div className="text-sm font-extrabold">Pertanyaan Umum</div>
             <div className="mt-1 text-xs text-[var(--yinn-muted)]">
-              Jawaban singkat untuk kendala yang sering terjadi saat order.
+              Info singkat biar gak bingung pas order.
             </div>
 
             <div className="mt-3 grid gap-2">
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
                 <div className="text-xs font-extrabold">OTP gak masuk</div>
                 <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
-                  Coba Resend, atau Cancel lalu order ulang di provider lain.
+                  Coba Resend. Kalau tetap kosong, Cancel lalu pilih provider lain.
                 </div>
               </div>
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="text-xs font-extrabold">Cancel tapi saldo kepotong</div>
+                <div className="text-xs font-extrabold">Stok kecil</div>
                 <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
-                  Biasanya refund otomatis beberapa menit. Kalau belum, cek Activity.
+                  Stok berasal dari server RumahOTP (bisa berubah tiap detik).
                 </div>
               </div>
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="text-xs font-extrabold">Syarat refund</div>
+                <div className="text-xs font-extrabold">Refund</div>
                 <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
-                  Refund berlaku kalau belum ada OTP masuk dan order di-cancel.
+                  Refund biasanya otomatis kalau belum ada OTP & order di-cancel.
                 </div>
               </div>
             </div>
@@ -849,17 +1053,18 @@ export default function OrderPage() {
 
       <BottomNav />
 
-      {/* BUY MODAL (flow sama: pilih aplikasi -> pilih negara -> pilih provider/harga -> order) */}
+      {/* BUY MODAL (flow: pilih aplikasi -> pilih negara -> pilih provider/harga -> order) */}
       <Modal
         open={openBuy}
         onClose={() => setOpenBuy(false)}
         title="Beli Nomor Virtual"
-        subtitle="Pilih sebuah aplikasi dan negaranya"
+        subtitle="Pilih aplikasi lalu negara & harga"
       >
-        {/* Step header */}
         <div className="mb-3 flex items-center justify-between">
           <div className="text-xs font-extrabold text-[var(--yinn-muted)]">
-            {buyStep === "app" ? "Step 1: Pilih aplikasi" : "Step 2: Pilih negara & harga"}
+            {buyStep === "app"
+              ? "Step 1: Pilih aplikasi"
+              : "Step 2: Pilih negara & harga"}
           </div>
 
           {buyStep === "country" ? (
@@ -879,7 +1084,6 @@ export default function OrderPage() {
 
         {buyStep === "app" ? (
           <>
-            {/* app search */}
             <div className="flex items-center gap-2 rounded-2xl border border-[var(--yinn-border)] px-3 py-2">
               <Search size={16} className="text-[var(--yinn-muted)]" />
               <input
@@ -891,8 +1095,9 @@ export default function OrderPage() {
               />
             </div>
 
-            {/* popular apps */}
-            <div className="mt-3 text-xs font-extrabold text-[var(--yinn-muted)]">Aplikasi Populer</div>
+            <div className="mt-3 text-xs font-extrabold text-[var(--yinn-muted)]">
+              Aplikasi Populer
+            </div>
             <div className="mt-2 grid grid-cols-3 gap-2">
               {popularResolved.map((p) => (
                 <button
@@ -911,7 +1116,6 @@ export default function OrderPage() {
               ))}
             </div>
 
-            {/* all apps list */}
             <div className="mt-3 rounded-2xl border border-[var(--yinn-border)]">
               {loadingServices ? (
                 <div className="p-3 grid gap-2">
@@ -935,23 +1139,25 @@ export default function OrderPage() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-extrabold">{s.service_name}</div>
-                        <div className="truncate text-[11px] text-[var(--yinn-muted)]">Tap untuk pilih</div>
+                        <div className="truncate text-[11px] text-[var(--yinn-muted)]">
+                          Tap untuk pilih
+                        </div>
                       </div>
                       <ChevronRight size={18} className="text-[var(--yinn-muted)]" />
                     </button>
                   ))}
                   {!filteredServices.length && (
-                    <div className="p-4 text-sm text-[var(--yinn-muted)]">Tidak ada aplikasi yang cocok.</div>
+                    <div className="p-4 text-sm text-[var(--yinn-muted)]">
+                      Tidak ada aplikasi yang cocok.
+                    </div>
                   )}
                 </div>
               )}
             </div>
-
             <div className="h-4" />
           </>
         ) : (
           <>
-            {/* selected app card */}
             <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
               <div className="flex items-center gap-3">
                 <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
@@ -968,8 +1174,12 @@ export default function OrderPage() {
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-extrabold">{pickedService?.service_name || "—"}</div>
-                  <div className="truncate text-xs text-[var(--yinn-muted)]">Aplikasi yang dipilih</div>
+                  <div className="truncate text-sm font-extrabold">
+                    {pickedService?.service_name || "—"}
+                  </div>
+                  <div className="truncate text-xs text-[var(--yinn-muted)]">
+                    Aplikasi yang dipilih
+                  </div>
                 </div>
 
                 <button
@@ -981,7 +1191,6 @@ export default function OrderPage() {
               </div>
             </div>
 
-            {/* country search */}
             <div className="mt-3 flex items-center gap-2 rounded-2xl border border-[var(--yinn-border)] px-3 py-2">
               <Search size={16} className="text-[var(--yinn-muted)]" />
               <input
@@ -993,7 +1202,6 @@ export default function OrderPage() {
               />
             </div>
 
-            {/* sort tabs */}
             <div className="mt-3 grid grid-cols-2 rounded-2xl border border-[var(--yinn-border)] p-1">
               <button
                 onClick={() => setSortMode("rate")}
@@ -1019,7 +1227,6 @@ export default function OrderPage() {
               </button>
             </div>
 
-            {/* countries list */}
             <div className="mt-3">
               {!serviceId ? (
                 <div className="rounded-2xl border border-[var(--yinn-border)] p-4 text-sm text-[var(--yinn-muted)]">
@@ -1036,45 +1243,71 @@ export default function OrderPage() {
                 <div className="rounded-2xl border border-[var(--yinn-border)]">
                   <div className="divide-y divide-[var(--yinn-border)]">
                     {filteredCountries.map((c) => {
-                      const open = String(expandedCountryId) === String(c?.number_id);
+                      const open =
+                        String(expandedCountryId) === String(c?.number_id);
                       const minp = minPriceFromCountry(c);
-                      const pricelist = Array.isArray(c?.pricelist) ? c.pricelist : [];
+                      const pricelist = Array.isArray(c?.pricelist)
+                        ? c.pricelist
+                        : [];
                       const flagUrl = flagUrlFromCountry(c);
+
+                      const stock = realStockFromCountry(c);
 
                       return (
                         <div key={String(c?.number_id || Math.random())}>
                           <button
                             className="flex w-full items-center gap-3 p-3 text-left hover:bg-black/5 dark:hover:bg-white/5"
                             onClick={() => {
-                              setExpandedCountryId(open ? "" : String(c?.number_id || ""));
+                              setExpandedCountryId(
+                                open ? "" : String(c?.number_id || "")
+                              );
                             }}
                           >
                             <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
                               {flagUrl ? (
-                                <img src={flagUrl} alt={c?.name || "Flag"} className="h-6 w-6" loading="lazy" />
+                                <img
+                                  src={flagUrl}
+                                  alt={c?.name || "Flag"}
+                                  className="h-6 w-6"
+                                  loading="lazy"
+                                />
                               ) : (
                                 <div className="text-sm font-extrabold">🏳️</div>
                               )}
                             </div>
 
                             <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-extrabold">{c?.name || "—"}</div>
+                              <div className="truncate text-sm font-extrabold">
+                                {c?.name || "—"}
+                              </div>
                               <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-[var(--yinn-muted)]">
                                 <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                                  {c?.prefix ? `+${String(c.prefix).replace("+", "")}` : "—"}
+                                  {c?.prefix
+                                    ? `+${String(c.prefix).replace("+", "")}`
+                                    : "—"}
                                 </span>
                                 <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
                                   {c?.short ? String(c.short) : "—"}
                                 </span>
+
+                                {/* FIX: stock jangan merah */}
                                 <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                                  Mulai {minp ? formatIDR(applyMarkup(minp)) : "—"}
+                                  Stok {stock || 0}
+                                </span>
+
+                                <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
+                                  Mulai{" "}
+                                  {minp ? formatIDR(applyMarkup(minp)) : "—"}
                                 </span>
                               </div>
                             </div>
 
                             <ChevronRight
                               size={18}
-                              className={cx("text-[var(--yinn-muted)] transition", open ? "rotate-90" : "")}
+                              className={cx(
+                                "text-[var(--yinn-muted)] transition",
+                                open ? "rotate-90" : ""
+                              )}
                             />
                           </button>
 
@@ -1087,50 +1320,62 @@ export default function OrderPage() {
                               ) : (
                                 <div className="overflow-hidden rounded-2xl border border-[var(--yinn-border)]">
                                   <div className="divide-y divide-[var(--yinn-border)]">
-                                    {pricelist.map((p) => {
-                                      const pid = String(p?.provider_id || "");
-                                      const key = `${String(c?.number_id || "")}-${pid}`;
-                                      const loading = orderingKey === key;
+                                    {pricelist
+                                      .filter((p) => String(p?.provider_id || "").trim())
+                                      .map((p) => {
+                                        const pid = String(p?.provider_id || "");
+                                        const key = `${String(
+                                          c?.number_id || ""
+                                        )}-${pid}`;
+                                        const loading = orderingKey === key;
 
-                                      const serverText = String(p?.server || p?.server_id || "").trim();
-                                      const serverLabel = serverText ? `Server ${serverText}` : "Server";
+                                        const serverText = String(
+                                          p?.server || p?.server_id || ""
+                                        ).trim();
+                                        const serverLabel = serverText
+                                          ? `Server ${serverText}`
+                                          : "Server";
 
-                                      const base = Number(p?.price || 0) || 0;
-                                      const sell = applyMarkup(base);
+                                        const base = safeNum(p?.price);
+                                        const sell = applyMarkup(base);
 
-                                      return (
-                                        <div key={pid} className="relative">
-                                          {loading ? <HoloOverlay /> : null}
+                                        return (
+                                          <div key={pid} className="relative">
+                                            {loading ? <HoloOverlay /> : null}
 
-                                          <div className="flex items-center gap-2 p-3">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                              <span className="rounded-full bg-blue-500/10 px-2 py-1 text-[11px] font-extrabold text-blue-600">
-                                                {serverLabel}
-                                              </span>
-                                              <span className="rounded-full bg-black/5 px-2 py-1 text-[11px] font-bold text-[var(--yinn-muted)] dark:bg-white/5">
-                                                ID: {pid || "—"}
-                                              </span>
-                                              {p?.rate ? (
-                                                <span className="rounded-full bg-rose-500/10 px-2 py-1 text-[11px] font-extrabold text-rose-600">
-                                                  {String(p.rate)}
+                                            <div className="flex items-center gap-2 p-3">
+                                              <div className="flex flex-wrap items-center gap-2">
+                                                <span className="rounded-full bg-blue-500/10 px-2 py-1 text-[11px] font-extrabold text-blue-600">
+                                                  {serverLabel}
                                                 </span>
-                                              ) : null}
-                                            </div>
+                                                <span className="rounded-full bg-black/5 px-2 py-1 text-[11px] font-bold text-[var(--yinn-muted)] dark:bg-white/5">
+                                                  ID: {pid || "—"}
+                                                </span>
+                                                {p?.rate ? (
+                                                  <span className="rounded-full bg-zinc-500/10 px-2 py-1 text-[11px] font-extrabold text-zinc-600">
+                                                    {String(p.rate)}
+                                                  </span>
+                                                ) : null}
+                                              </div>
 
-                                            <div className="ms-auto flex items-center gap-2">
-                                              <div className="text-sm font-extrabold">{formatIDR(sell)}</div>
-                                              <button
-                                                onClick={() => orderFromProvider(c, p)}
-                                                className="rounded-xl border border-[var(--yinn-border)] px-4 py-2 text-xs font-extrabold"
-                                                disabled={!!orderingKey}
-                                              >
-                                                Order
-                                              </button>
+                                              <div className="ms-auto flex items-center gap-2">
+                                                <div className="text-sm font-extrabold">
+                                                  {formatIDR(sell)}
+                                                </div>
+                                                <button
+                                                  onClick={() =>
+                                                    orderFromProvider(c, p)
+                                                  }
+                                                  className="rounded-xl border border-[var(--yinn-border)] px-4 py-2 text-xs font-extrabold"
+                                                  disabled={!!orderingKey}
+                                                >
+                                                  Order
+                                                </button>
+                                              </div>
                                             </div>
                                           </div>
-                                        </div>
-                                      );
-                                    })}
+                                        );
+                                      })}
                                   </div>
                                 </div>
                               )}
@@ -1141,7 +1386,9 @@ export default function OrderPage() {
                     })}
 
                     {!filteredCountries.length && (
-                      <div className="p-4 text-sm text-[var(--yinn-muted)]">Negara tidak ditemukan.</div>
+                      <div className="p-4 text-sm text-[var(--yinn-muted)]">
+                        Negara tidak ditemukan.
+                      </div>
                     )}
                   </div>
                 </div>

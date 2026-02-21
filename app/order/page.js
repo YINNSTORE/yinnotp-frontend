@@ -2212,3 +2212,4 @@ export default function OrderPage() {
       </Modal>
     </div>
   );
+}

@@ -1,12 +1,11 @@
 // app/dashboard/page.js
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import ThemeMenu from "../components/ThemeMenu";
 import BottomNav from "../components/BottomNav";
 import { Bell, ChevronRight, Flame, Plus, Search, ShieldCheck, Smartphone, Sparkles } from "lucide-react";
-import { useAnimatedBalance } from "../_lib/balanceClient";
 
 const formatIDR = (n) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(
@@ -39,17 +38,8 @@ function readCookie(name) {
 function extractTokenFromUnknown(v) {
   if (!v) return "";
   if (typeof v === "string") return v;
-
-  // JSON object string?
   if (typeof v === "object") {
-    return (
-      v.token ||
-      v.access_token ||
-      v.accessToken ||
-      v.jwt ||
-      v.sessionToken ||
-      ""
-    );
+    return v.token || v.access_token || v.accessToken || v.jwt || v.sessionToken || "";
   }
   return "";
 }
@@ -58,7 +48,6 @@ function getTokenFromStorage() {
   if (typeof window === "undefined") return "";
 
   const candidates = [
-    // localStorage keys umum
     localStorage.getItem("yinnotp_token"),
     localStorage.getItem("token"),
     localStorage.getItem("access_token"),
@@ -66,13 +55,9 @@ function getTokenFromStorage() {
     localStorage.getItem("jwt"),
     localStorage.getItem("sessionToken"),
     localStorage.getItem("auth_token"),
-
-    // kadang disimpan sebagai JSON string
     localStorage.getItem("yinnotp_auth"),
     localStorage.getItem("auth"),
     localStorage.getItem("session"),
-
-    // sessionStorage juga sering dipakai
     sessionStorage.getItem("yinnotp_token"),
     sessionStorage.getItem("token"),
     sessionStorage.getItem("access_token"),
@@ -80,10 +65,7 @@ function getTokenFromStorage() {
   ].filter(Boolean);
 
   for (const raw of candidates) {
-    // kalau string token panjang, langsung pakai
     if (typeof raw === "string" && raw.length > 20 && !raw.trim().startsWith("{")) return raw.trim();
-
-    // coba parse json
     try {
       const obj = JSON.parse(raw);
       const t = extractTokenFromUnknown(obj);
@@ -91,37 +73,51 @@ function getTokenFromStorage() {
     } catch (_) {}
   }
 
-  // cookie fallback
   const cookieToken =
-    readCookie("yinnotp_token") ||
-    readCookie("token") ||
-    readCookie("access_token") ||
-    readCookie("accessToken");
+    readCookie("yinnotp_token") || readCookie("token") || readCookie("access_token") || readCookie("accessToken");
 
   if (cookieToken && cookieToken.length > 20) return cookieToken.trim();
 
   return "";
 }
 
-function saveBalanceToStorage(balance) {
-  if (typeof window === "undefined") return;
+function useCountUp(target, { durationMs = 550 } = {}) {
+  const [value, setValue] = useState(0);
+  const rafRef = useRef(null);
+  const fromRef = useRef(0);
+  const toRef = useRef(0);
+  const startRef = useRef(0);
 
-  // key umum
-  localStorage.setItem("yinnotp_balance", String(balance));
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
 
-  // key per-user (kalau ada)
-  const uid =
-    localStorage.getItem("yinnotp_uid") ||
-    localStorage.getItem("yinnotp_user_id") ||
-    localStorage.getItem("user_id") ||
-    "";
+  useEffect(() => {
+    const nextTarget = Number.isFinite(target) ? target : 0;
 
-  if (uid) {
-    localStorage.setItem(`yinnotp_balance:${uid}`, String(balance));
-  }
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
 
-  // trigger listener (beberapa hook balance pakai event ini)
-  window.dispatchEvent(new Event("storage"));
+    const from = value;
+    fromRef.current = from;
+    toRef.current = nextTarget;
+    startRef.current = performance.now();
+
+    const tick = (now) => {
+      const t = Math.min(1, (now - startRef.current) / durationMs);
+      // easeOutCubic
+      const eased = 1 - Math.pow(1 - t, 3);
+      const cur = Math.round(fromRef.current + (toRef.current - fromRef.current) * eased);
+      setValue(cur);
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target]);
+
+  return value;
 }
 
 export default function DashboardPage() {
@@ -131,10 +127,8 @@ export default function DashboardPage() {
   const [query, setQuery] = useState("");
   const [user, setUser] = useState({ name: "User" });
 
-  // ini source saldo yang paling “benar” untuk Dashboard
-  const [serverBalance, setServerBalance] = useState(null);
-
-  const { displayBalance } = useAnimatedBalance({ durationMs: 650 });
+  const [serverBalance, setServerBalance] = useState(0);
+  const displayBalance = useCountUp(serverBalance, { durationMs: 550 });
 
   const banners = useMemo(
     () => [
@@ -199,7 +193,6 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    // Sync saldo dari server supaya header dashboard akurat (tidak balik 0)
     if (typeof window === "undefined") return;
 
     const token = getTokenFromStorage();
@@ -217,22 +210,12 @@ export default function DashboardPage() {
 
         const j = await res.json();
         const bal = Number(j?.balance ?? 0);
-
-        if (Number.isFinite(bal)) {
-          setServerBalance(bal);
-          saveBalanceToStorage(bal);
-        } else {
-          setServerBalance(0);
-        }
+        setServerBalance(Number.isFinite(bal) ? bal : 0);
       } catch (_) {
-        // kalau fetch gagal, minimal jangan bikin NaN
         setServerBalance(0);
       }
     })();
   }, []);
-
-  // Prioritas tampilan saldo: serverBalance (kalau sudah ada) -> animated balance
-  const shownBalance = typeof serverBalance === "number" ? serverBalance : displayBalance;
 
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
@@ -255,7 +238,7 @@ export default function DashboardPage() {
           <div className="ms-auto flex items-center gap-2">
             <div className="flex items-center gap-2 rounded-xl border border-[var(--yinn-border)] px-3 py-2" style={{ boxShadow: "var(--yinn-soft)" }}>
               <span className="text-[11px] text-[var(--yinn-muted)]">Saldo</span>
-              <span className="text-sm font-semibold">{formatIDR(shownBalance)}</span>
+              <span className="text-sm font-semibold">{formatIDR(displayBalance)}</span>
               <Link
                 href="/topup"
                 className="grid h-7 w-7 place-items-center rounded-lg text-white"
@@ -398,7 +381,11 @@ export default function DashboardPage() {
                   "whitespace-nowrap rounded-full border px-4 py-2 text-sm font-semibold",
                   c === filter ? "border-transparent text-white" : "border-[var(--yinn-border)] bg-[var(--yinn-surface)]",
                 ].join(" ")}
-                style={c === filter ? { background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" } : undefined}
+                style={
+                  c === filter
+                    ? { background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }
+                    : undefined
+                }
               >
                 {c === "Populer" ? (
                   <span className="inline-flex items-center gap-2">

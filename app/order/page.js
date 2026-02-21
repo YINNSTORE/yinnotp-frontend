@@ -137,6 +137,16 @@ function applyMarkup(price) {
   return n + MARKUP_FLAT_IDR;
 }
 
+/* FIX: rate tampil pakai persen seperti RumahOTP */
+function fmtRatePercent(rate) {
+  const n = Number(rate);
+  if (!Number.isFinite(n)) return "";
+  // RumahOTP biasa 2 desimal (31.84%), tapi kalau 100 ya 100%
+  const isInt = Math.abs(n - Math.round(n)) < 1e-9;
+  const v = isInt ? String(Math.round(n)) : n.toFixed(2);
+  return `${v}%`;
+}
+
 /* ================= flags ================= */
 
 function flagCodeForCountry(country) {
@@ -177,7 +187,6 @@ function flagUrlFromCountry(country) {
 }
 
 /* ================= Scroll Reveal (IntersectionObserver) ================= */
-/* FIX: bikin reveal bener-bener kerasa + smooth (inline style biar gak ke-purge) */
 function Reveal({ children, className = "" }) {
   const ref = useRef(null);
   const [inView, setInView] = useState(false);
@@ -217,7 +226,7 @@ function Reveal({ children, className = "" }) {
   );
 }
 
-/* ================= Skeleton shimmer (kilauan bergerak + mengikuti layout) ================= */
+/* ================= Skeleton shimmer ================= */
 
 function Skel({ className = "" }) {
   return <div className={cx("yinn-skel", className)} />;
@@ -272,11 +281,9 @@ function SkeletonProviderRow() {
   );
 }
 
-/* FIX: boot loading ngikut layout struktur asli (tanpa teks) */
 function BootPageSkeleton() {
   return (
     <div className="mx-auto max-w-[520px] px-4 pt-4 pb-[calc(120px+env(safe-area-inset-bottom))]">
-      {/* top cards */}
       <section className="grid grid-cols-2 gap-3">
         <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
           <div className="flex items-center gap-2">
@@ -310,7 +317,6 @@ function BootPageSkeleton() {
         </div>
       </section>
 
-      {/* pending */}
       <section className="mt-4 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
         <div className="flex items-center justify-between">
           <Skel className="h-4 w-32 rounded-md" />
@@ -325,7 +331,6 @@ function BootPageSkeleton() {
         </div>
       </section>
 
-      {/* bottom cards */}
       <section className="mt-4 grid grid-cols-2 gap-3">
         <div className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
           <Skel className="h-4 w-24 rounded-md" />
@@ -365,7 +370,6 @@ function FullscreenBoot({ show }) {
   if (!show) return null;
   return (
     <div className="fixed inset-0 z-[90] bg-[var(--yinn-bg)]">
-      {/* FIX #1 + #2: gak ada teks, skeleton full layout */}
       <BootPageSkeleton />
     </div>
   );
@@ -411,7 +415,6 @@ function Modal({ open, onClose, title, subtitle, children }) {
           </div>
         </div>
 
-        {/* FIX #3: scroll modal bener-bener halus (momentum) */}
         <div
           className="px-4 pb-[calc(16px+env(safe-area-inset-bottom))] yinn-smoothscroll"
           style={{
@@ -476,7 +479,7 @@ export default function OrderPage() {
   const [polling, setPolling] = useState(false);
   const pollRef = useRef(null);
 
-  /* FIX #4: pas buka "Buat Pesanan" selalu ada loading animasi sebentar (ikut skeleton script) */
+  /* loading anim sebentar pas modal */
   const [modalKickLoading, setModalKickLoading] = useState(false);
   const modalKickRef = useRef(null);
   function kickModalLoading(ms = 450) {
@@ -484,6 +487,13 @@ export default function OrderPage() {
     if (modalKickRef.current) clearTimeout(modalKickRef.current);
     modalKickRef.current = setTimeout(() => setModalKickLoading(false), ms);
   }
+
+  /* ================== NEW: operator picker modal ================== */
+  const [openOperator, setOpenOperator] = useState(false);
+  const [opLoading, setOpLoading] = useState(false);
+  const [operators, setOperators] = useState([]);
+  const [opCtx, setOpCtx] = useState({ country: null, provider: null }); // untuk tau order siapa
+  const [opOrdering, setOpOrdering] = useState(false);
 
   const pickedService = useMemo(() => {
     return (
@@ -779,33 +789,62 @@ export default function OrderPage() {
     startPolling(order_id);
   }
 
-  async function orderFromProvider(country, provider) {
+  /* ================= NEW: operator picker flow ================= */
+
+  async function openOperatorPicker(country, provider) {
     const cid = String(country?.number_id || "");
     const pid = String(provider?.provider_id || "");
-    const countryName = String(country?.name || "");
+    const countryName = String(country?.name || "").trim();
 
     if (!cid || !pid || !countryName) {
       toast.error("Data negara/provider tidak valid");
       return;
     }
 
-    const key = `${cid}-${pid}`;
-    setOrderingKey(key);
+    setOpCtx({ country, provider });
+    setOperators([]);
+    setOpenOperator(true);
+    setOpLoading(true);
 
     try {
       const opRes = await roOperators(countryName, pid);
-      if (!opRes.ok || !opRes.json?.status) {
+      // beberapa response pakai {success:true} tapi docs v2 operator contoh {status:true}
+      const ok = !!(opRes?.ok && (opRes?.json?.status || opRes?.json?.success));
+      if (!ok) {
         toast.error("Gagal load operator");
+        setOperators([]);
         return;
       }
-
       const ops = Array.isArray(opRes.json?.data) ? opRes.json.data : [];
-      const oid = ops?.[0]?.id ? String(ops[0].id) : "";
-      if (!oid) {
+      if (!ops.length) {
         toast.error("Operator kosong untuk provider ini");
+        setOperators([]);
         return;
       }
+      setOperators(ops);
+    } catch {
+      toast.error("Server error load operator");
+      setOperators([]);
+    } finally {
+      setOpLoading(false);
+    }
+  }
 
+  async function orderWithOperator(country, provider, operator) {
+    const cid = String(country?.number_id || "");
+    const pid = String(provider?.provider_id || "");
+    const oid = String(operator?.id || "");
+
+    if (!cid || !pid || !oid) {
+      toast.error("Operator tidak valid");
+      return;
+    }
+
+    const key = `${cid}-${pid}`;
+    setOrderingKey(key);
+    setOpOrdering(true);
+
+    try {
       const r = await roOrder(cid, pid, oid);
       if (!r.ok || !r.json?.success) {
         toast.error("Gagal buat order");
@@ -826,7 +865,7 @@ export default function OrderPage() {
         phone_number: data.phone_number || "",
         service: data.service || pickedService?.service_name || "",
         country: data.country || country?.name || "",
-        operator: data.operator || ops?.[0]?.name || "",
+        operator: data.operator || operator?.name || "",
         expires_in_minute: data.expires_in_minute || 0,
         price: sellPrice,
         created_at: Date.now(),
@@ -848,11 +887,13 @@ export default function OrderPage() {
       });
 
       toast.success("Order dibuat");
+      setOpenOperator(false);
       setOpenBuy(false);
       startPolling(row.order_id);
     } catch {
       toast.error("Server error");
     } finally {
+      setOpOrdering(false);
       setOrderingKey("");
     }
   }
@@ -863,7 +904,7 @@ export default function OrderPage() {
     setServiceSearch("");
     setCountrySearch("");
     setExpandedCountryId("");
-    kickModalLoading(); // FIX #4
+    kickModalLoading();
   }
 
   function selectServiceAndGoCountries(svc) {
@@ -875,7 +916,7 @@ export default function OrderPage() {
     setExpandedCountryId("");
     setBuyStep("country");
 
-    kickModalLoading(); // FIX #4
+    kickModalLoading();
     loadCountriesForService(sid);
   }
 
@@ -941,7 +982,6 @@ export default function OrderPage() {
           -webkit-tap-highlight-color: transparent;
         }
 
-        /* Skeleton shimmer (kilauan bergerak) */
         .yinn-skel {
           position: relative;
           overflow: hidden;
@@ -980,7 +1020,6 @@ export default function OrderPage() {
           }
         }
 
-        /* Smooth scroll */
         .yinn-smoothscroll {
           scroll-behavior: smooth;
           -webkit-overflow-scrolling: touch;
@@ -1344,7 +1383,7 @@ export default function OrderPage() {
                 setBuyStep("app");
                 setCountrySearch("");
                 setExpandedCountryId("");
-                kickModalLoading(); // biar saat balik ada animasi loading halus juga
+                kickModalLoading();
               }}
               className="inline-flex items-center gap-2 rounded-xl border border-[var(--yinn-border)] px-3 py-2 text-xs font-extrabold"
             >
@@ -1371,7 +1410,6 @@ export default function OrderPage() {
               Aplikasi Populer
             </div>
 
-            {/* skeleton popular ikut struktur */}
             {showAppLoading ? (
               <div className="mt-2 grid grid-cols-3 gap-2">
                 {Array.from({ length: 6 }).map((_, i) => (
@@ -1680,9 +1718,12 @@ export default function OrderPage() {
                                                   <span className="rounded-full bg-black/5 px-2 py-1 text-[11px] font-bold text-[var(--yinn-muted)] dark:bg-white/5">
                                                     ID: {pid || "—"}
                                                   </span>
-                                                  {p?.rate ? (
+
+                                                  {/* FIX #2: rate pakai persen */}
+                                                  {typeof p?.rate !== "undefined" &&
+                                                  p?.rate !== null ? (
                                                     <span className="rounded-full bg-zinc-500/10 px-2 py-1 text-[11px] font-extrabold text-zinc-600">
-                                                      {String(p.rate)}
+                                                      {fmtRatePercent(p.rate)}
                                                     </span>
                                                   ) : null}
                                                 </div>
@@ -1691,9 +1732,11 @@ export default function OrderPage() {
                                                   <div className="text-sm font-extrabold">
                                                     {formatIDR(sell)}
                                                   </div>
+
+                                                  {/* FIX #1: klik Order -> pilih operator dulu */}
                                                   <button
                                                     onClick={() =>
-                                                      orderFromProvider(c, p)
+                                                      openOperatorPicker(c, p)
                                                     }
                                                     className="rounded-xl border border-[var(--yinn-border)] px-4 py-2 text-xs font-extrabold"
                                                     disabled={!!orderingKey}
@@ -1727,6 +1770,101 @@ export default function OrderPage() {
 
             <div className="h-4" />
           </>
+        )}
+      </Modal>
+
+      {/* OPERATOR MODAL (NEW) */}
+      <Modal
+        open={openOperator}
+        onClose={() => {
+          if (opOrdering) return;
+          setOpenOperator(false);
+        }}
+        title="Pilih Operator Seluler"
+        subtitle={
+          opCtx?.country?.name && opCtx?.provider?.provider_id
+            ? `${String(opCtx.country.name)} • Provider ID ${String(
+                opCtx.provider.provider_id
+              )}`
+            : "Pilih operator sebelum order"
+        }
+      >
+        {opLoading ? (
+          <div className="grid gap-3">
+            <div className="rounded-2xl border border-[var(--yinn-border)] p-4">
+              <Skel className="h-4 w-40 rounded-md" />
+              <div className="mt-3 grid grid-cols-4 gap-3">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="rounded-2xl border border-[var(--yinn-border)] p-3"
+                  >
+                    <Skel className="mx-auto h-10 w-10 rounded-2xl" />
+                    <div className="mt-2">
+                      <Skel className="mx-auto h-3 w-14 rounded-md" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : operators.length ? (
+          <>
+            <div className="rounded-2xl border border-[var(--yinn-border)] p-3 text-xs text-[var(--yinn-muted)]">
+              Tap salah satu operator. (Rekomendasi: <b>any</b> biar cepat)
+            </div>
+
+            <div className="mt-3 grid grid-cols-4 gap-3">
+              {operators.map((op) => {
+                const name = String(op?.name || "—");
+                const img = String(op?.image || "").trim();
+                const id = String(op?.id || "");
+
+                return (
+                  <button
+                    key={id || name}
+                    disabled={opOrdering}
+                    onClick={() => {
+                      const c = opCtx?.country;
+                      const p = opCtx?.provider;
+                      if (!c || !p) return;
+                      orderWithOperator(c, p, op);
+                    }}
+                    className="rounded-2xl border border-[var(--yinn-border)] p-3 text-center hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-60"
+                    style={{ boxShadow: "var(--yinn-soft)" }}
+                  >
+                    <div className="mx-auto grid h-12 w-12 place-items-center overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
+                      {img ? (
+                        <img
+                          src={img}
+                          alt={name}
+                          className="h-10 w-10 object-contain"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="text-sm font-extrabold">OP</div>
+                      )}
+                    </div>
+                    <div className="mt-2 truncate text-xs font-extrabold">
+                      {name}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => setOpenOperator(false)}
+              disabled={opOrdering}
+              className="mt-4 w-full rounded-2xl border border-[var(--yinn-border)] py-3 text-sm font-extrabold disabled:opacity-60"
+            >
+              {opOrdering ? "Memproses..." : "Batal"}
+            </button>
+          </>
+        ) : (
+          <div className="rounded-2xl border border-[var(--yinn-border)] p-4 text-sm text-[var(--yinn-muted)]">
+            Operator tidak tersedia / gagal dimuat.
+          </div>
         )}
       </Modal>
     </div>

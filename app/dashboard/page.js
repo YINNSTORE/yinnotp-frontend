@@ -30,14 +30,77 @@ function AppLogo({ src, alt, fallback = "✨" }) {
   );
 }
 
+function readCookie(name) {
+  if (typeof document === "undefined") return "";
+  const m = document.cookie.match(new RegExp("(^|; )" + name.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&") + "=([^;]*)"));
+  return m ? decodeURIComponent(m[2]) : "";
+}
+
+function extractTokenFromUnknown(v) {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+
+  // JSON object string?
+  if (typeof v === "object") {
+    return (
+      v.token ||
+      v.access_token ||
+      v.accessToken ||
+      v.jwt ||
+      v.sessionToken ||
+      ""
+    );
+  }
+  return "";
+}
+
 function getTokenFromStorage() {
   if (typeof window === "undefined") return "";
-  return (
-    localStorage.getItem("yinnotp_token") ||
-    localStorage.getItem("token") ||
-    localStorage.getItem("access_token") ||
-    ""
-  );
+
+  const candidates = [
+    // localStorage keys umum
+    localStorage.getItem("yinnotp_token"),
+    localStorage.getItem("token"),
+    localStorage.getItem("access_token"),
+    localStorage.getItem("accessToken"),
+    localStorage.getItem("jwt"),
+    localStorage.getItem("sessionToken"),
+    localStorage.getItem("auth_token"),
+
+    // kadang disimpan sebagai JSON string
+    localStorage.getItem("yinnotp_auth"),
+    localStorage.getItem("auth"),
+    localStorage.getItem("session"),
+
+    // sessionStorage juga sering dipakai
+    sessionStorage.getItem("yinnotp_token"),
+    sessionStorage.getItem("token"),
+    sessionStorage.getItem("access_token"),
+    sessionStorage.getItem("yinnotp_auth"),
+  ].filter(Boolean);
+
+  for (const raw of candidates) {
+    // kalau string token panjang, langsung pakai
+    if (typeof raw === "string" && raw.length > 20 && !raw.trim().startsWith("{")) return raw.trim();
+
+    // coba parse json
+    try {
+      const obj = JSON.parse(raw);
+      const t = extractTokenFromUnknown(obj);
+      if (t && typeof t === "string" && t.length > 20) return t.trim();
+    } catch (_) {}
+  }
+
+  // cookie fallback
+  const cookieToken =
+    readCookie("yinnotp_token") ||
+    readCookie("token") ||
+    readCookie("access_token") ||
+    readCookie("accessToken");
+
+  if (cookieToken && cookieToken.length > 20) return cookieToken.trim();
+
+  return "";
 }
 
 function saveBalanceToStorage(balance) {
@@ -68,16 +131,14 @@ export default function DashboardPage() {
   const [query, setQuery] = useState("");
   const [user, setUser] = useState({ name: "User" });
 
+  // ini source saldo yang paling “benar” untuk Dashboard
+  const [serverBalance, setServerBalance] = useState(null);
+
   const { displayBalance } = useAnimatedBalance({ durationMs: 650 });
 
   const banners = useMemo(
     () => [
-      {
-        title: "JOIN CHANNEL YinnOTP",
-        subtitle: "Info stock, update sistem, & diskon harian.",
-        badge: "Update",
-        cta: { label: "Gabung", href: "https://t.me/" },
-      },
+      { title: "JOIN CHANNEL YinnOTP", subtitle: "Info stock, update sistem, & diskon harian.", badge: "Update", cta: { label: "Gabung", href: "https://t.me/" } },
       { title: "DELIVER RATE 99%", subtitle: "Nomor fresh • cepat masuk • auto cancel", badge: "Quality", cta: { label: "Order OTP", href: "/order" } },
       { title: "API READY", subtitle: "Integrasi mudah untuk bot & automation.", badge: "Dev", cta: { label: "Mulai", href: "/order" } },
     ],
@@ -142,7 +203,10 @@ export default function DashboardPage() {
     if (typeof window === "undefined") return;
 
     const token = getTokenFromStorage();
-    if (!token) return;
+    if (!token) {
+      setServerBalance(0);
+      return;
+    }
 
     (async () => {
       try {
@@ -152,16 +216,23 @@ export default function DashboardPage() {
         });
 
         const j = await res.json();
-        const balance = Number(j?.balance ?? 0);
+        const bal = Number(j?.balance ?? 0);
 
-        if (Number.isFinite(balance)) {
-          saveBalanceToStorage(balance);
+        if (Number.isFinite(bal)) {
+          setServerBalance(bal);
+          saveBalanceToStorage(bal);
+        } else {
+          setServerBalance(0);
         }
       } catch (_) {
-        // ignore
+        // kalau fetch gagal, minimal jangan bikin NaN
+        setServerBalance(0);
       }
     })();
   }, []);
+
+  // Prioritas tampilan saldo: serverBalance (kalau sudah ada) -> animated balance
+  const shownBalance = typeof serverBalance === "number" ? serverBalance : displayBalance;
 
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
@@ -170,10 +241,7 @@ export default function DashboardPage() {
           <div className="flex min-w-0 items-center gap-2">
             <div
               className="yinn-float-up grid h-9 w-9 place-items-center rounded-xl"
-              style={{
-                background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
-                boxShadow: "var(--yinn-soft)",
-              }}
+              style={{ background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))", boxShadow: "var(--yinn-soft)" }}
               aria-hidden="true"
             >
               <span className="text-white text-base leading-none">☄𔓎</span>
@@ -187,7 +255,7 @@ export default function DashboardPage() {
           <div className="ms-auto flex items-center gap-2">
             <div className="flex items-center gap-2 rounded-xl border border-[var(--yinn-border)] px-3 py-2" style={{ boxShadow: "var(--yinn-soft)" }}>
               <span className="text-[11px] text-[var(--yinn-muted)]">Saldo</span>
-              <span className="text-sm font-semibold">{formatIDR(displayBalance)}</span>
+              <span className="text-sm font-semibold">{formatIDR(shownBalance)}</span>
               <Link
                 href="/topup"
                 className="grid h-7 w-7 place-items-center rounded-lg text-white"
@@ -217,10 +285,7 @@ export default function DashboardPage() {
         <section className="relative overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)]" style={{ boxShadow: "var(--yinn-soft)" }}>
           <div className="relative h-[140px]">
             {banners.map((b, i) => (
-              <div
-                key={b.title}
-                className={["absolute inset-0 transition-opacity duration-500", i === slide ? "opacity-100" : "opacity-0"].join(" ")}
-              >
+              <div key={b.title} className={["absolute inset-0 transition-opacity duration-500", i === slide ? "opacity-100" : "opacity-0"].join(" ")}>
                 <div
                   className="h-full w-full"
                   style={{
@@ -359,12 +424,7 @@ export default function DashboardPage() {
 
           <div className="mt-3 grid grid-cols-3 gap-3">
             {filteredApps.map((a) => (
-              <Link
-                key={a.name}
-                href="/order"
-                className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3"
-                style={{ boxShadow: "var(--yinn-soft)" }}
-              >
+              <Link key={a.name} href="/order" className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3" style={{ boxShadow: "var(--yinn-soft)" }}>
                 <div className="grid place-items-center">
                   <AppLogo src={a.icon} alt={a.name} fallback={a.emoji} />
                 </div>

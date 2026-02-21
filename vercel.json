@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/deposit/:path*",
+      "destination": "https://yinnhosting.serv00.net/api/deposit/:path*"
+    }
+  ]
+}

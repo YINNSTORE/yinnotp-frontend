@@ -30,6 +30,37 @@ function AppLogo({ src, alt, fallback = "✨" }) {
   );
 }
 
+function getTokenFromStorage() {
+  if (typeof window === "undefined") return "";
+  return (
+    localStorage.getItem("yinnotp_token") ||
+    localStorage.getItem("token") ||
+    localStorage.getItem("access_token") ||
+    ""
+  );
+}
+
+function saveBalanceToStorage(balance) {
+  if (typeof window === "undefined") return;
+
+  // key umum
+  localStorage.setItem("yinnotp_balance", String(balance));
+
+  // key per-user (kalau ada)
+  const uid =
+    localStorage.getItem("yinnotp_uid") ||
+    localStorage.getItem("yinnotp_user_id") ||
+    localStorage.getItem("user_id") ||
+    "";
+
+  if (uid) {
+    localStorage.setItem(`yinnotp_balance:${uid}`, String(balance));
+  }
+
+  // trigger listener (beberapa hook balance pakai event ini)
+  window.dispatchEvent(new Event("storage"));
+}
+
 export default function DashboardPage() {
   const [slide, setSlide] = useState(0);
   const [filter, setFilter] = useState("Populer");
@@ -41,7 +72,12 @@ export default function DashboardPage() {
 
   const banners = useMemo(
     () => [
-      { title: "JOIN CHANNEL YinnOTP", subtitle: "Info stock, update sistem, & diskon harian.", badge: "Update", cta: { label: "Gabung", href: "https://t.me/" } },
+      {
+        title: "JOIN CHANNEL YinnOTP",
+        subtitle: "Info stock, update sistem, & diskon harian.",
+        badge: "Update",
+        cta: { label: "Gabung", href: "https://t.me/" },
+      },
       { title: "DELIVER RATE 99%", subtitle: "Nomor fresh • cepat masuk • auto cancel", badge: "Quality", cta: { label: "Order OTP", href: "/order" } },
       { title: "API READY", subtitle: "Integrasi mudah untuk bot & automation.", badge: "Dev", cta: { label: "Mulai", href: "/order" } },
     ],
@@ -101,6 +137,32 @@ export default function DashboardPage() {
     setUser({ name: storedName });
   }, []);
 
+  useEffect(() => {
+    // Sync saldo dari server supaya header dashboard akurat (tidak balik 0)
+    if (typeof window === "undefined") return;
+
+    const token = getTokenFromStorage();
+    if (!token) return;
+
+    (async () => {
+      try {
+        const res = await fetch("/api/deposit/me.php", {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+
+        const j = await res.json();
+        const balance = Number(j?.balance ?? 0);
+
+        if (Number.isFinite(balance)) {
+          saveBalanceToStorage(balance);
+        }
+      } catch (_) {
+        // ignore
+      }
+    })();
+  }, []);
+
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
       <header className="sticky top-0 z-40 border-b border-[var(--yinn-border)] bg-[var(--yinn-surface)]">
@@ -108,7 +170,10 @@ export default function DashboardPage() {
           <div className="flex min-w-0 items-center gap-2">
             <div
               className="yinn-float-up grid h-9 w-9 place-items-center rounded-xl"
-              style={{ background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))", boxShadow: "var(--yinn-soft)" }}
+              style={{
+                background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                boxShadow: "var(--yinn-soft)",
+              }}
               aria-hidden="true"
             >
               <span className="text-white text-base leading-none">☄𔓎</span>
@@ -152,7 +217,10 @@ export default function DashboardPage() {
         <section className="relative overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)]" style={{ boxShadow: "var(--yinn-soft)" }}>
           <div className="relative h-[140px]">
             {banners.map((b, i) => (
-              <div key={b.title} className={["absolute inset-0 transition-opacity duration-500", i === slide ? "opacity-100" : "opacity-0"].join(" ")}>
+              <div
+                key={b.title}
+                className={["absolute inset-0 transition-opacity duration-500", i === slide ? "opacity-100" : "opacity-0"].join(" ")}
+              >
                 <div
                   className="h-full w-full"
                   style={{
@@ -265,11 +333,7 @@ export default function DashboardPage() {
                   "whitespace-nowrap rounded-full border px-4 py-2 text-sm font-semibold",
                   c === filter ? "border-transparent text-white" : "border-[var(--yinn-border)] bg-[var(--yinn-surface)]",
                 ].join(" ")}
-                style={
-                  c === filter
-                    ? { background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }
-                    : undefined
-                }
+                style={c === filter ? { background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" } : undefined}
               >
                 {c === "Populer" ? (
                   <span className="inline-flex items-center gap-2">
@@ -295,7 +359,12 @@ export default function DashboardPage() {
 
           <div className="mt-3 grid grid-cols-3 gap-3">
             {filteredApps.map((a) => (
-              <Link key={a.name} href="/order" className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3" style={{ boxShadow: "var(--yinn-soft)" }}>
+              <Link
+                key={a.name}
+                href="/order"
+                className="rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3"
+                style={{ boxShadow: "var(--yinn-soft)" }}
+              >
                 <div className="grid place-items-center">
                   <AppLogo src={a.icon} alt={a.name} fallback={a.emoji} />
                 </div>

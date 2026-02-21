@@ -4,9 +4,50 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import ThemeMenu from "../../components/ThemeMenu";
 import BottomNav from "../../components/BottomNav";
-import { ArrowLeft, Trash2, Copy, RefreshCcw, Wallet } from "lucide-react";
+import {
+  ArrowLeft,
+  Trash2,
+  Copy,
+  RefreshCcw,
+  Wallet,
+  ArrowDownLeft,
+  ArrowUpRight,
+  BadgeCheck,
+  Ban,
+} from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import { activityClear, activityList } from "../../_lib/activityStore";
+
+/* ========= NEW (sync with OrderPage local balance fallback) ========= */
+const LS_BALANCE_KEY = "yinnotp:balance_idr:v1";
+
+function safeNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatIDR(n) {
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(safeNum(n));
+}
+
+function readJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function balanceGet() {
+  return safeNum(readJSON(LS_BALANCE_KEY, 0));
+}
+/* ================================================================ */
 
 function copyText(t) {
   const s = String(t || "");
@@ -39,7 +80,13 @@ function fmt(ts) {
 
 function readCookie(name) {
   if (typeof document === "undefined") return "";
-  const m = document.cookie.match(new RegExp("(^|; )" + name.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&") + "=([^;]*)"));
+  const m = document.cookie.match(
+    new RegExp(
+      "(^|; )" +
+        name.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&") +
+        "=([^;]*)"
+    )
+  );
   return m ? decodeURIComponent(m[2]) : "";
 }
 
@@ -47,7 +94,14 @@ function extractTokenFromUnknown(v) {
   if (!v) return "";
   if (typeof v === "string") return v;
   if (typeof v === "object") {
-    return v.token || v.access_token || v.accessToken || v.jwt || v.sessionToken || "";
+    return (
+      v.token ||
+      v.access_token ||
+      v.accessToken ||
+      v.jwt ||
+      v.sessionToken ||
+      ""
+    );
   }
   return "";
 }
@@ -73,7 +127,12 @@ function getTokenFromStorage() {
   ].filter(Boolean);
 
   for (const raw of candidates) {
-    if (typeof raw === "string" && raw.length > 20 && !raw.trim().startsWith("{")) return raw.trim();
+    if (
+      typeof raw === "string" &&
+      raw.length > 20 &&
+      !raw.trim().startsWith("{")
+    )
+      return raw.trim();
     try {
       const obj = JSON.parse(raw);
       const t = extractTokenFromUnknown(obj);
@@ -82,7 +141,10 @@ function getTokenFromStorage() {
   }
 
   const cookieToken =
-    readCookie("yinnotp_token") || readCookie("token") || readCookie("access_token") || readCookie("accessToken");
+    readCookie("yinnotp_token") ||
+    readCookie("token") ||
+    readCookie("access_token") ||
+    readCookie("accessToken");
 
   if (cookieToken && cookieToken.length > 20) return cookieToken.trim();
 
@@ -91,15 +153,26 @@ function getTokenFromStorage() {
 
 function isDepositPaid(d) {
   const s = String(d?.status || d?.gateway_status || "").toLowerCase();
-  return s === "paid" || s === "completed" || s.includes("paid") || s.includes("completed") || s.includes("settled");
+  return (
+    s === "paid" ||
+    s === "completed" ||
+    s.includes("paid") ||
+    s.includes("completed") ||
+    s.includes("settled")
+  );
 }
 
+/* ========= UPDATED badges (support cancel/refund) ========= */
 function badge(type) {
   const t = String(type || "");
 
   // ORDER
   if (t === "order_create") return { label: "ORDER", bg: "rgba(67,97,238,.14)" };
   if (t === "order_status") return { label: "STATUS", bg: "rgba(34,197,94,.14)" };
+  if (t === "order_cancel") return { label: "CANCEL", bg: "rgba(239,68,68,.14)" };
+
+  // REFUND
+  if (t === "refund") return { label: "REFUND", bg: "rgba(16,185,129,.16)" };
 
   // DEPOSIT
   if (t === "deposit_paid") return { label: "DEPOSIT", bg: "rgba(168,85,247,.16)" };
@@ -107,10 +180,18 @@ function badge(type) {
   return { label: "LOG", bg: "rgba(245,158,11,.14)" };
 }
 
+function isOrderType(t) {
+  const s = String(t || "");
+  return s.startsWith("order_") || s === "refund";
+}
+
 export default function ActivityPage() {
   const [items, setItems] = useState([]);
   const [tab, setTab] = useState("all"); // all | order | deposit
   const [loading, setLoading] = useState(false);
+
+  // NEW: show saldo fallback at top
+  const [balanceIdr, setBalanceIdr] = useState(0);
 
   async function loadDepositPaid() {
     const token = getTokenFromStorage();
@@ -123,13 +204,20 @@ export default function ActivityPage() {
       });
       const j = await r.json();
 
-      const list = Array.isArray(j?.history) ? j.history : Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : [];
+      const list = Array.isArray(j?.history)
+        ? j.history
+        : Array.isArray(j?.data)
+        ? j.data
+        : Array.isArray(j)
+        ? j
+        : [];
       const paid = list.filter(isDepositPaid);
 
       // mapping jadi activity item
       return paid.map((d) => {
         const orderId = String(d?.order_id || d?.orderId || d?.reference || "");
-        const ts = d?.paid_at || d?.completed_at || d?.updated_at || d?.created_at || null;
+        const ts =
+          d?.paid_at || d?.completed_at || d?.updated_at || d?.created_at || null;
 
         return {
           type: "deposit_paid",
@@ -155,11 +243,13 @@ export default function ActivityPage() {
       const deposits = await loadDepositPaid();
 
       // gabung + sort desc by ts
-      const merged = [...(Array.isArray(local) ? local : []), ...deposits].sort((a, b) => {
-        const ta = new Date(a?.ts || 0).getTime() || 0;
-        const tb = new Date(b?.ts || 0).getTime() || 0;
-        return tb - ta;
-      });
+      const merged = [...(Array.isArray(local) ? local : []), ...deposits].sort(
+        (a, b) => {
+          const ta = new Date(a?.ts || 0).getTime() || 0;
+          const tb = new Date(b?.ts || 0).getTime() || 0;
+          return tb - ta;
+        }
+      );
 
       setItems(merged);
     } finally {
@@ -169,12 +259,24 @@ export default function ActivityPage() {
 
   useEffect(() => {
     refreshAll();
+
+    // NEW: load & live update balance fallback
+    setBalanceIdr(balanceGet());
+    const onBal = () => setBalanceIdr(balanceGet());
+    try {
+      window.addEventListener("yinnotp:balance_changed", onBal);
+    } catch {}
+    return () => {
+      try {
+        window.removeEventListener("yinnotp:balance_changed", onBal);
+      } catch {}
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filtered = useMemo(() => {
     const arr = Array.isArray(items) ? items : [];
-    if (tab === "order") return arr.filter((x) => String(x?.type || "").startsWith("order_"));
+    if (tab === "order") return arr.filter((x) => isOrderType(x?.type));
     if (tab === "deposit") return arr.filter((x) => String(x?.type || "") === "deposit_paid");
     return arr;
   }, [items, tab]);
@@ -196,7 +298,9 @@ export default function ActivityPage() {
           </Link>
 
           <div className="min-w-0">
-            <div className="truncate text-sm font-extrabold leading-tight">Activity</div>
+            <div className="truncate text-sm font-extrabold leading-tight">
+              Activity
+            </div>
             <div className="truncate text-[11px] text-[var(--yinn-muted)]">
               {filtered.length} items {loading ? "• syncing..." : ""}
             </div>
@@ -205,6 +309,7 @@ export default function ActivityPage() {
           <div className="ms-auto flex items-center gap-2">
             <button
               onClick={() => {
+                setBalanceIdr(balanceGet());
                 refreshAll();
                 toast.success("Synced");
               }}
@@ -217,10 +322,9 @@ export default function ActivityPage() {
 
             <button
               onClick={() => {
-                activityClear();
-                // deposit remote gak dihapus, jadi kita refresh ulang
+                activityClear(); // deposit remote gak dihapus
                 refreshAll();
-                toast.success("Cleared (order logs)");
+                toast.success("Cleared (local logs)");
               }}
               className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)]"
               aria-label="Clear"
@@ -230,6 +334,14 @@ export default function ActivityPage() {
             </button>
 
             <ThemeMenu />
+          </div>
+        </div>
+
+        {/* NEW: saldo kecil di header (biar user paham refund/potong jalan) */}
+        <div className="mx-auto max-w-[520px] px-4 -mt-1 pb-2">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--yinn-border)] bg-[var(--yinn-surface)] px-3 py-1 text-[11px] font-extrabold text-[var(--yinn-muted)]">
+            <Wallet size={14} />
+            Saldo (fallback): <span className="text-[var(--yinn-text)]">{formatIDR(balanceIdr)}</span>
           </div>
         </div>
 
@@ -246,11 +358,16 @@ export default function ActivityPage() {
                 onClick={() => setTab(c.k)}
                 className={[
                   "rounded-full border px-4 py-2 text-sm font-extrabold",
-                  tab === c.k ? "border-transparent text-white" : "border-[var(--yinn-border)] bg-[var(--yinn-surface)]",
+                  tab === c.k
+                    ? "border-transparent text-white"
+                    : "border-[var(--yinn-border)] bg-[var(--yinn-surface)]",
                 ].join(" ")}
                 style={
                   tab === c.k
-                    ? { background: "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))" }
+                    ? {
+                        background:
+                          "linear-gradient(135deg, var(--yinn-brand-from), var(--yinn-brand-to))",
+                      }
                     : { boxShadow: "var(--yinn-soft)" }
                 }
               >
@@ -267,7 +384,6 @@ export default function ActivityPage() {
             {filtered.map((it, idx) => {
               const b = badge(it?.type);
 
-              // shared
               const oid = String(it?.order_id || "");
               const ts = it?.ts;
 
@@ -280,6 +396,9 @@ export default function ActivityPage() {
               const operator = String(it?.operator || "");
               const price = Number(it?.price || 0) || 0;
 
+              // refund fields
+              const refundAmount = Number(it?.amount || it?.refunded_amount || 0) || 0;
+
               // deposit fields
               const amount = Number(it?.amount || 0) || 0;
               const fee = Number(it?.fee || 0) || 0;
@@ -287,18 +406,40 @@ export default function ActivityPage() {
               const method = String(it?.payment_method || "—");
               const reference = String(it?.reference || "—");
 
-              const isDeposit = String(it?.type || "") === "deposit_paid";
+              const type = String(it?.type || "");
+              const isDeposit = type === "deposit_paid";
+              const isRefund = type === "refund";
+              const isCancel = type === "order_cancel";
+
+              const icon = isDeposit ? (
+                <Wallet size={16} />
+              ) : isRefund ? (
+                <ArrowDownLeft size={16} />
+              ) : isCancel ? (
+                <Ban size={16} />
+              ) : type === "order_status" ? (
+                <BadgeCheck size={16} />
+              ) : (
+                <ArrowUpRight size={16} />
+              );
 
               return (
                 <div
                   key={`${oid}-${idx}-${ts || idx}`}
                   className="rounded-2xl border border-[var(--yinn-border)] p-4"
-                  style={{ background: "var(--yinn-surface)", boxShadow: "var(--yinn-soft)" }}
+                  style={{
+                    background: "var(--yinn-surface)",
+                    boxShadow: "var(--yinn-soft)",
+                  }}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <div className="inline-flex rounded-full px-2 py-1 text-[11px] font-extrabold" style={{ background: b.bg }}>
+                        <div
+                          className="inline-flex items-center gap-2 rounded-full px-2 py-1 text-[11px] font-extrabold"
+                          style={{ background: b.bg }}
+                        >
+                          {icon}
                           {b.label}
                         </div>
 
@@ -310,8 +451,12 @@ export default function ActivityPage() {
                         ) : null}
                       </div>
 
-                      <div className="mt-2 text-sm font-extrabold break-all">{oid || "—"}</div>
-                      <div className="mt-1 text-[12px] text-[var(--yinn-muted)]">{fmt(ts)}</div>
+                      <div className="mt-2 text-sm font-extrabold break-all">
+                        {oid || "—"}
+                      </div>
+                      <div className="mt-1 text-[12px] text-[var(--yinn-muted)]">
+                        {fmt(ts)}
+                      </div>
                     </div>
 
                     <button
@@ -332,24 +477,59 @@ export default function ActivityPage() {
                     <div className="mt-3 grid gap-1 text-sm">
                       <div className="flex items-center justify-between">
                         <span className="text-[var(--yinn-muted)]">Nominal</span>
-                        <span className="font-extrabold">Rp {amount.toLocaleString("id-ID")}</span>
+                        <span className="font-extrabold">
+                          {formatIDR(amount)}
+                        </span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-[var(--yinn-muted)]">Fee</span>
-                        <span className="font-extrabold">Rp {fee.toLocaleString("id-ID")}</span>
+                        <span className="font-extrabold">{formatIDR(fee)}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-[var(--yinn-muted)]">Total</span>
-                        <span className="font-extrabold">Rp {total.toLocaleString("id-ID")}</span>
+                        <span className="font-extrabold">
+                          {formatIDR(total)}
+                        </span>
                       </div>
                       <div className="mt-2 rounded-xl border border-[var(--yinn-border)] p-3 text-[12px]">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[var(--yinn-muted)]">Reference</span>
-                          <span className="font-extrabold break-all">{reference}</span>
+                          <span className="text-[var(--yinn-muted)]">
+                            Reference
+                          </span>
+                          <span className="font-extrabold break-all">
+                            {reference}
+                          </span>
                         </div>
                       </div>
                     </div>
-                  ) : it?.type === "order_create" ? (
+                  ) : isRefund ? (
+                    <div className="mt-3 grid gap-1 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[var(--yinn-muted)]">Refund</span>
+                        <span className="font-extrabold">
+                          {formatIDR(refundAmount)}
+                        </span>
+                      </div>
+                      {phone || service ? (
+                        <div className="mt-2 rounded-xl border border-[var(--yinn-border)] p-3 text-[12px]">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[var(--yinn-muted)]">
+                              Phone
+                            </span>
+                            <span className="font-extrabold">{phone || "—"}</span>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between">
+                            <span className="text-[var(--yinn-muted)]">
+                              Service
+                            </span>
+                            <span className="font-extrabold">
+                              {service || "—"}
+                            </span>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : type === "order_create" ? (
                     <div className="mt-3 grid gap-1 text-sm">
                       <div className="flex items-center justify-between">
                         <span className="text-[var(--yinn-muted)]">Service</span>
@@ -369,13 +549,17 @@ export default function ActivityPage() {
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-[var(--yinn-muted)]">Price</span>
-                        <span className="font-extrabold">Rp {price.toLocaleString("id-ID")}</span>
+                        <span className="font-extrabold">
+                          {formatIDR(price)}
+                        </span>
                       </div>
                     </div>
                   ) : (
                     <div className="mt-3 grid gap-1 text-sm">
                       <div className="flex items-center justify-between">
-                        <span className="text-[var(--yinn-muted)]">Status</span>
+                        <span className="text-[var(--yinn-muted)]">
+                          {isCancel ? "Cancel" : "Status"}
+                        </span>
                         <span className="font-extrabold">{st || "—"}</span>
                       </div>
                       <div className="flex items-center justify-between">
@@ -391,7 +575,10 @@ export default function ActivityPage() {
         ) : (
           <div
             className="rounded-2xl border border-[var(--yinn-border)] p-4 text-sm text-[var(--yinn-muted)]"
-            style={{ background: "var(--yinn-surface)", boxShadow: "var(--yinn-soft)" }}
+            style={{
+              background: "var(--yinn-surface)",
+              boxShadow: "var(--yinn-soft)",
+            }}
           >
             Belum ada activity.
           </div>

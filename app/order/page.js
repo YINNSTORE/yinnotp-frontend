@@ -33,6 +33,10 @@ import { activityAdd } from "../_lib/activityStore";
 const MARKUP_FLAT_IDR = 1000;
 const LS_NOTIF_KEY = "yinnotp:notif_enabled:v1";
 
+// NEW: persist pending orders + balance (client-side fallback)
+const LS_PENDING_KEY = "yinnotp:pending_orders:v1";
+const LS_BALANCE_KEY = "yinnotp:balance_idr:v1"; // fallback only (kalau belum ada store saldo global)
+
 function cx(...xs) {
   return xs.filter(Boolean).join(" ");
 }
@@ -141,10 +145,98 @@ function applyMarkup(price) {
 function fmtRatePercent(rate) {
   const n = Number(rate);
   if (!Number.isFinite(n)) return "";
-  // RumahOTP biasa 2 desimal (31.84%), tapi kalau 100 ya 100%
   const isInt = Math.abs(n - Math.round(n)) < 1e-9;
   const v = isInt ? String(Math.round(n)) : n.toFixed(2);
   return `${v}%`;
+}
+
+/* ================= localStorage helpers (pending + balance fallback) ================= */
+
+function readJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJSON(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+function balanceGet() {
+  // fallback ONLY: kalau kamu udah punya saldo store sendiri, ganti ini ke store itu.
+  const v = readJSON(LS_BALANCE_KEY, 0);
+  return safeNum(v);
+}
+
+function balanceSet(n) {
+  writeJSON(LS_BALANCE_KEY, safeNum(n));
+  try {
+    window.dispatchEvent(
+      new CustomEvent("yinnotp:balance_changed", { detail: { balance: n } })
+    );
+  } catch {}
+}
+
+function balanceApplyDelta(delta) {
+  const cur = balanceGet();
+  const next = cur + safeNum(delta);
+  balanceSet(next);
+  return next;
+}
+
+function pendingLoad() {
+  const list = readJSON(LS_PENDING_KEY, []);
+  return Array.isArray(list) ? list : [];
+}
+
+function pendingSave(list) {
+  writeJSON(LS_PENDING_KEY, Array.isArray(list) ? list : []);
+}
+
+function upsertPending(list, order) {
+  const oid = String(order?.order_id || "");
+  if (!oid) return list;
+
+  const next = Array.isArray(list) ? list.slice() : [];
+  const idx = next.findIndex((x) => String(x?.order_id) === oid);
+  if (idx >= 0) next[idx] = { ...next[idx], ...order };
+  else next.unshift(order);
+  // keep newest first
+  next.sort((a, b) => safeNum(b?.created_at) - safeNum(a?.created_at));
+  return next;
+}
+
+function updatePendingStatus(list, order_id, patch) {
+  const oid = String(order_id || "");
+  if (!oid) return list;
+  const next = Array.isArray(list) ? list.slice() : [];
+  const idx = next.findIndex((x) => String(x?.order_id) === oid);
+  if (idx >= 0) next[idx] = { ...next[idx], ...patch };
+  return next;
+}
+
+function fmtMMSS(sec) {
+  const s = Math.max(0, Math.floor(safeNum(sec)));
+  const mm = String(Math.floor(s / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+function shouldRefund(order) {
+  // Refund kalau belum ada OTP dan belum “received/done/completed”
+  const status = String(order?.status || "").toLowerCase();
+  const otp = String(order?.otp_code || "").trim();
+  const otpOk = otp && otp !== "-" && otp !== "—";
+  if (otpOk) return false;
+  if (status.includes("received")) return false;
+  if (status.includes("done") || status.includes("completed")) return false;
+  return true;
 }
 
 /* ================= flags ================= */
@@ -186,7 +278,7 @@ function flagUrlFromCountry(country) {
   return `https://assets.rumahotp.com/flags/${code}.png`;
 }
 
-/* ================= Scroll Reveal (IntersectionObserver) ================= */
+/* ================= Scroll Reveal (smoothed) ================= */
 function Reveal({ children, className = "" }) {
   const ref = useRef(null);
   const [inView, setInView] = useState(false);
@@ -204,7 +296,7 @@ function Reveal({ children, className = "" }) {
           }
         }
       },
-      { threshold: 0.16 }
+      { threshold: 0.12 }
     );
 
     obs.observe(el);
@@ -217,8 +309,9 @@ function Reveal({ children, className = "" }) {
       className={cx("will-change-transform", className)}
       style={{
         opacity: inView ? 1 : 0,
-        transform: inView ? "scale(1)" : "scale(0.8)",
-        transition: "transform 320ms ease-out, opacity 320ms ease-out",
+        transform: inView ? "translateY(0px)" : "translateY(10px)",
+        transition: "transform 220ms ease-out, opacity 220ms ease-out",
+        contain: "content",
       }}
     >
       {children}
@@ -381,7 +474,7 @@ function Modal({ open, onClose, title, subtitle, children }) {
     const onKey = (e) => {
       if (e.key === "Escape") onClose?.();
     };
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, { passive: true });
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
@@ -422,6 +515,7 @@ function Modal({ open, onClose, title, subtitle, children }) {
             overflowY: "auto",
             WebkitOverflowScrolling: "touch",
             overscrollBehavior: "contain",
+            scrollBehavior: "auto",
           }}
         >
           {children}
@@ -451,6 +545,9 @@ export default function OrderPage() {
   const [lastPingTs, setLastPingTs] = useState(0);
   const [ago, setAgo] = useState(0);
 
+  // NEW: balance fallback + refresh when other page changes it
+  const [balanceIdr, setBalanceIdr] = useState(0);
+
   // notifikasi realtime (Browser Notification)
   const [notifEnabled, setNotifEnabled] = useState(false);
   const [notifState, setNotifState] = useState("unsupported"); // unsupported | default | granted | denied
@@ -476,8 +573,19 @@ export default function OrderPage() {
 
   // order status
   const [activeOrder, setActiveOrder] = useState(null);
+  const activeOrderRef = useRef(null);
+
   const [polling, setPolling] = useState(false);
   const pollRef = useRef(null);
+
+  // NEW: pending orders list (persist)
+  const [pendingOrders, setPendingOrders] = useState([]);
+
+  // NEW: cancel state (cooldown button tetap bisa di klik, tapi disable pas request doang)
+  const [cancelling, setCancelling] = useState(false);
+
+  // NEW: countdown tick (cooldown UI)
+  const [tick, setTick] = useState(0);
 
   /* loading anim sebentar pas modal */
   const [modalKickLoading, setModalKickLoading] = useState(false);
@@ -488,11 +596,11 @@ export default function OrderPage() {
     modalKickRef.current = setTimeout(() => setModalKickLoading(false), ms);
   }
 
-  /* ================== NEW: operator picker modal ================== */
+  /* ================== operator picker modal ================== */
   const [openOperator, setOpenOperator] = useState(false);
   const [opLoading, setOpLoading] = useState(false);
   const [operators, setOperators] = useState([]);
-  const [opCtx, setOpCtx] = useState({ country: null, provider: null }); // untuk tau order siapa
+  const [opCtx, setOpCtx] = useState({ country: null, provider: null });
   const [opOrdering, setOpOrdering] = useState(false);
 
   const pickedService = useMemo(() => {
@@ -723,15 +831,33 @@ export default function OrderPage() {
     return r.json?.data || null;
   }
 
+  function persistOrderPatch(order_id, patch) {
+    setPendingOrders((prev) => {
+      const next = updatePendingStatus(prev, order_id, patch);
+      pendingSave(next);
+      return next;
+    });
+  }
+
   async function startPolling(order_id) {
     stopPolling();
     setPolling(true);
 
     const first = await pollOnce(order_id);
     if (first) {
-      setActiveOrder((o) =>
-        o ? { ...o, status: first.status, otp_code: first.otp_code } : o
-      );
+      // update active + pending storage
+      setActiveOrder((o) => {
+        if (!o) return o;
+        const next = { ...o, status: first.status, otp_code: first.otp_code };
+        activeOrderRef.current = next;
+        return next;
+      });
+
+      persistOrderPatch(order_id, {
+        status: first.status,
+        otp_code: first.otp_code,
+        updated_at: Date.now(),
+      });
 
       activityAdd({
         type: "order_status",
@@ -741,8 +867,9 @@ export default function OrderPage() {
         ts: Date.now(),
       });
 
+      const phone = activeOrderRef.current?.phone_number || "";
       if (String(first.otp_code || "").trim()) {
-        fireOtpNotification(first.otp_code, activeOrder?.phone_number);
+        fireOtpNotification(first.otp_code, phone);
       }
 
       if (isFinalStatus(first.status)) {
@@ -758,10 +885,18 @@ export default function OrderPage() {
       setActiveOrder((o) => {
         if (!o) return o;
         const next = { ...o, status: data.status, otp_code: data.otp_code };
+        activeOrderRef.current = next;
+
         if (String(data?.otp_code || "").trim()) {
           fireOtpNotification(data.otp_code, next.phone_number);
         }
         return next;
+      });
+
+      persistOrderPatch(order_id, {
+        status: data.status,
+        otp_code: data.otp_code,
+        updated_at: Date.now(),
       });
 
       activityAdd({
@@ -777,8 +912,8 @@ export default function OrderPage() {
   }
 
   async function setStatus(action) {
-    if (!activeOrder?.order_id) return;
-    const order_id = activeOrder.order_id;
+    if (!activeOrderRef.current?.order_id) return;
+    const order_id = activeOrderRef.current.order_id;
 
     const r = await roStatusSet(order_id, action);
     if (!r.ok || !r.json?.success) {
@@ -789,7 +924,82 @@ export default function OrderPage() {
     startPolling(order_id);
   }
 
-  /* ================= NEW: operator picker flow ================= */
+  // NEW: cancel yang bener-bener jalan + refund saldo (kalau eligible)
+  async function cancelOrder() {
+    const order = activeOrderRef.current;
+    if (!order?.order_id) return;
+    if (cancelling) return;
+
+    setCancelling(true);
+    try {
+      // tetap allow klik saat cooldown
+      const r = await roStatusSet(order.order_id, "cancel");
+      if (!r.ok || !r.json?.success) {
+        toast.error("Gagal cancel (mungkin masih cooldown / server)");
+        return;
+      }
+
+      // update status local cepat
+      const patch = { status: "canceled", canceled_at: Date.now() };
+      setActiveOrder((o) => {
+        if (!o) return o;
+        const next = { ...o, ...patch };
+        activeOrderRef.current = next;
+        return next;
+      });
+      persistOrderPatch(order.order_id, patch);
+
+      activityAdd({
+        type: "order_cancel",
+        order_id: order.order_id,
+        ts: Date.now(),
+      });
+
+      // refund logic: hanya kalau sebelumnya sudah kepotong & belum terpakai verif
+      const alreadyCharged = !!order?.charged;
+      const refundable = shouldRefund(order);
+      if (alreadyCharged && refundable) {
+        const amt = safeNum(order?.charged_amount || order?.price || 0);
+        if (amt > 0) {
+          balanceApplyDelta(amt);
+          toast.success(`Cancel sukses • Refund ${formatIDR(amt)}`);
+          // mark refunded
+          const refundPatch = {
+            charged: false,
+            refunded: true,
+            refunded_amount: amt,
+            refunded_at: Date.now(),
+          };
+          setActiveOrder((o) => {
+            if (!o) return o;
+            const next = { ...o, ...refundPatch };
+            activeOrderRef.current = next;
+            return next;
+          });
+          persistOrderPatch(order.order_id, refundPatch);
+
+          activityAdd({
+            type: "refund",
+            order_id: order.order_id,
+            amount: amt,
+            ts: Date.now(),
+          });
+        } else {
+          toast.success("Cancel sukses");
+        }
+      } else {
+        toast.success("Cancel sukses");
+      }
+
+      stopPolling();
+    } catch {
+      toast.error("Server error cancel");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  /* ================= operator picker flow ================= */
 
   async function openOperatorPicker(country, provider) {
     const cid = String(country?.number_id || "");
@@ -808,7 +1018,6 @@ export default function OrderPage() {
 
     try {
       const opRes = await roOperators(countryName, pid);
-      // beberapa response pakai {success:true} tapi docs v2 operator contoh {status:true}
       const ok = !!(opRes?.ok && (opRes?.json?.status || opRes?.json?.success));
       if (!ok) {
         toast.error("Gagal load operator");
@@ -860,6 +1069,27 @@ export default function OrderPage() {
       const basePrice = safeNum(data.price || provider?.price);
       const sellPrice = applyMarkup(basePrice);
 
+      // NEW: potong saldo beneran (fallback localStorage)
+      const curBal = balanceGet();
+      if (sellPrice > 0 && curBal < sellPrice) {
+        // Kalau backend udah motong saldo, bagian ini bisa dihapus.
+        toast.error("Saldo tidak cukup");
+        // optional: cancel order yang baru kebentuk di server biar gak nyangkut
+        try {
+          await roStatusSet(String(data.order_id), "cancel");
+        } catch {}
+        return;
+      }
+
+      if (sellPrice > 0) {
+        balanceApplyDelta(-sellPrice);
+        setBalanceIdr(balanceGet());
+      }
+
+      const createdAt = Date.now();
+      const cooldownSec = safeNum(data?.cooldown_second || data?.cooldown || 180);
+      const cooldownUntil = createdAt + cooldownSec * 1000;
+
       const row = {
         order_id: data.order_id,
         phone_number: data.phone_number || "",
@@ -868,12 +1098,30 @@ export default function OrderPage() {
         operator: data.operator || operator?.name || "",
         expires_in_minute: data.expires_in_minute || 0,
         price: sellPrice,
-        created_at: Date.now(),
+        created_at: createdAt,
         status: "waiting",
         otp_code: "-",
+
+        // NEW: charge tracking for refund
+        charged: sellPrice > 0,
+        charged_amount: sellPrice,
+        refunded: false,
+
+        // NEW: cooldown tracking
+        cooldown_second: cooldownSec,
+        cooldown_until: cooldownUntil,
       };
 
+      // set active + ref
       setActiveOrder(row);
+      activeOrderRef.current = row;
+
+      // NEW: masuk pending list + persist (biar muncul di pending & activity)
+      setPendingOrders((prev) => {
+        const next = upsertPending(prev, row);
+        pendingSave(next);
+        return next;
+      });
 
       activityAdd({
         type: "order_create",
@@ -889,6 +1137,7 @@ export default function OrderPage() {
       toast.success("Order dibuat");
       setOpenOperator(false);
       setOpenBuy(false);
+
       startPolling(row.order_id);
     } catch {
       toast.error("Server error");
@@ -932,6 +1181,27 @@ export default function OrderPage() {
 
     updateNotifStateFromBrowser();
 
+    // NEW: load pending orders + set activeOrder (latest non-final kalau ada)
+    try {
+      const list = pendingLoad();
+      setPendingOrders(list);
+
+      const latestActive =
+        list.find((x) => x && !isFinalStatus(x?.status)) || list[0] || null;
+
+      if (latestActive?.order_id) {
+        setActiveOrder(latestActive);
+        activeOrderRef.current = latestActive;
+      }
+    } catch {}
+
+    // NEW: load balance fallback
+    setBalanceIdr(balanceGet());
+    const onBal = () => setBalanceIdr(balanceGet());
+    try {
+      window.addEventListener("yinnotp:balance_changed", onBal);
+    } catch {}
+
     (async () => {
       setBootLoading(true);
       await Promise.allSettled([refreshPing(), loadServices()]);
@@ -941,11 +1211,19 @@ export default function OrderPage() {
     })();
 
     const t = setInterval(() => refreshPing(), 5000);
+
+    // NEW: tick for countdown UI
+    const t2 = setInterval(() => setTick((x) => x + 1), 250);
+
     return () => {
       alive = false;
       clearInterval(t);
+      clearInterval(t2);
       stopPolling();
       if (modalKickRef.current) clearTimeout(modalKickRef.current);
+      try {
+        window.removeEventListener("yinnotp:balance_changed", onBal);
+      } catch {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -966,6 +1244,29 @@ export default function OrderPage() {
   const showAppLoading = loadingServices || modalKickLoading;
   const showCountryLoading = loadingCountries || modalKickLoading;
 
+  // NEW: derive current pending card = latest non-final
+  const currentPending = useMemo(() => {
+    const list = Array.isArray(pendingOrders) ? pendingOrders : [];
+    const hit =
+      list.find((x) => x && !isFinalStatus(x?.status)) ||
+      (activeOrder && !isFinalStatus(activeOrder?.status) ? activeOrder : null);
+    return hit || null;
+  }, [pendingOrders, activeOrder]);
+
+  const pendingCount = useMemo(() => {
+    const list = Array.isArray(pendingOrders) ? pendingOrders : [];
+    return list.filter((x) => x && !isFinalStatus(x?.status)).length;
+  }, [pendingOrders]);
+
+  // cooldown seconds left
+  const cooldownLeftSec = useMemo(() => {
+    const o = currentPending;
+    const until = safeNum(o?.cooldown_until);
+    if (!until) return 0;
+    return Math.max(0, Math.ceil((until - Date.now()) / 1000));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPending?.cooldown_until, tick]);
+
   /* ================= render ================= */
 
   return (
@@ -976,7 +1277,7 @@ export default function OrderPage() {
       <style jsx global>{`
         html,
         body {
-          scroll-behavior: smooth;
+          scroll-behavior: auto; /* biar scroll finger natural & smooth (bukan animasi) */
         }
         * {
           -webkit-tap-highlight-color: transparent;
@@ -1021,9 +1322,9 @@ export default function OrderPage() {
         }
 
         .yinn-smoothscroll {
-          scroll-behavior: smooth;
           -webkit-overflow-scrolling: touch;
           overscroll-behavior: contain;
+          scroll-behavior: auto;
         }
       `}</style>
 
@@ -1051,9 +1352,12 @@ export default function OrderPage() {
 
           <div className="ms-auto flex items-center gap-2">
             <button
-              onClick={refreshPing}
+              onClick={() => {
+                setBalanceIdr(balanceGet());
+                refreshPing();
+              }}
               className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)]"
-              aria-label="Refresh ping"
+              aria-label="Refresh"
               title="Refresh"
             >
               <RefreshCw size={16} className={checking ? "animate-spin" : ""} />
@@ -1104,10 +1408,11 @@ export default function OrderPage() {
               </button>
             </div>
 
-            <div className="mt-3 text-sm font-extrabold">
-              <MsBadge ms={latencyMs} />{" "}
-              <span className="ms-1">response server</span>
+            {/* NEW: saldo fallback display (biar keliatan potong/refund) */}
+            <div className="mt-3 text-xs font-extrabold text-[var(--yinn-muted)]">
+              Saldo (fallback)
             </div>
+            <div className="mt-1 text-sm font-extrabold">{formatIDR(balanceIdr)}</div>
 
             <button
               onClick={openBuyModal}
@@ -1173,10 +1478,15 @@ export default function OrderPage() {
           }}
         >
           <div className="flex items-center justify-between">
-            <div className="text-sm font-extrabold">Pesanan Pending</div>
+            <div className="text-sm font-extrabold">
+              Pesanan Pending{" "}
+              <span className="ms-2 rounded-full border border-[var(--yinn-border)] px-2 py-0.5 text-[11px] font-extrabold text-[var(--yinn-muted)]">
+                {pendingCount}
+              </span>
+            </div>
             <button
               onClick={() =>
-                activeOrder?.order_id && startPolling(activeOrder.order_id)
+                currentPending?.order_id && startPolling(currentPending.order_id)
               }
               className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)]"
               aria-label="Sync order"
@@ -1186,41 +1496,70 @@ export default function OrderPage() {
             </button>
           </div>
 
-          {activeOrder ? (
+          {currentPending ? (
             <div className="mt-3 grid gap-3">
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="text-xs font-bold text-[var(--yinn-muted)]">
-                  STATUS
-                </div>
-                <div className="mt-1 text-sm font-extrabold">
-                  {statusLabel(activeOrder.status)}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="text-xs font-bold text-[var(--yinn-muted)]">
-                  PHONE
-                </div>
-                <div className="mt-1 text-sm font-extrabold break-all">
-                  {activeOrder.phone_number || "—"}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="text-xs font-bold text-[var(--yinn-muted)]">
-                  OTP
-                </div>
-                <div className="mt-1 text-lg font-extrabold break-all">
-                  {activeOrder.otp_code || "-"}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                      NOMOR
+                    </div>
+                    <div className="mt-1 text-sm font-extrabold break-all">
+                      {currentPending.phone_number || "—"}
+                    </div>
+                    <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
+                      {currentPending.service || "—"} •{" "}
+                      {currentPending.operator || "—"}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[11px] font-extrabold text-[var(--yinn-muted)]">
+                      HARGA
+                    </div>
+                    <div className="mt-1 text-sm font-extrabold">
+                      {formatIDR(currentPending.price || 0)}
+                    </div>
+                  </div>
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
+                  <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                    STATUS
+                  </div>
+                  <div className="mt-1 text-sm font-extrabold">
+                    {statusLabel(currentPending.status)}
+                  </div>
+                  {cooldownLeftSec > 0 ? (
+                    <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
+                      Tunggu <b>{fmtMMSS(cooldownLeftSec)}</b> (cooldown)
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
+                      Bisa cancel kapan saja
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
+                  <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                    OTP
+                  </div>
+                  <div className="mt-1 text-lg font-extrabold break-all">
+                    {currentPending.otp_code || "-"}
+                  </div>
+                </div>
+              </div>
+
+              {/* tombol utama (sesuai request: cancel harus bisa dipencet saat cooldown) */}
               <div className="grid grid-cols-3 gap-2">
                 <button
-                  onClick={() => setStatus("cancel")}
-                  className="rounded-xl border border-[var(--yinn-border)] px-3 py-3 text-sm font-extrabold"
+                  onClick={cancelOrder}
+                  disabled={cancelling}
+                  className="rounded-xl border border-[var(--yinn-border)] px-3 py-3 text-sm font-extrabold disabled:opacity-60"
                 >
-                  Cancel
+                  {cancelling ? "..." : "Batal"}
                 </button>
                 <button
                   onClick={() => setStatus("resend")}
@@ -1234,6 +1573,11 @@ export default function OrderPage() {
                 >
                   Done
                 </button>
+              </div>
+
+              <div className="rounded-2xl border border-[var(--yinn-border)] p-3 text-xs text-[var(--yinn-muted)]">
+                Refund otomatis kalau kamu cancel dan <b>OTP belum masuk</b> / nomor
+                belum terpakai verifikasi.
               </div>
             </div>
           ) : (
@@ -1345,15 +1689,16 @@ export default function OrderPage() {
                 </div>
               </div>
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="text-xs font-extrabold">Stok kecil</div>
+                <div className="text-xs font-extrabold">Cancel & refund</div>
                 <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
-                  Stok dari dari server (bisa berubah kapan saja).
+                  Tombol Batal tetap bisa dipencet walau cooldown. Refund jalan kalau
+                  OTP belum masuk.
                 </div>
               </div>
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
-                <div className="text-xs font-extrabold">Refund</div>
+                <div className="text-xs font-extrabold">Activity</div>
                 <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
-                  Refund biasanya otomatis kalau belum ada OTP & order di-cancel.
+                  Semua create / status / cancel / refund otomatis masuk ke Activity.
                 </div>
               </div>
             </div>
@@ -1719,7 +2064,6 @@ export default function OrderPage() {
                                                     ID: {pid || "—"}
                                                   </span>
 
-                                                  {/* FIX #2: rate pakai persen */}
                                                   {typeof p?.rate !== "undefined" &&
                                                   p?.rate !== null ? (
                                                     <span className="rounded-full bg-zinc-500/10 px-2 py-1 text-[11px] font-extrabold text-zinc-600">
@@ -1733,7 +2077,6 @@ export default function OrderPage() {
                                                     {formatIDR(sell)}
                                                   </div>
 
-                                                  {/* FIX #1: klik Order -> pilih operator dulu */}
                                                   <button
                                                     onClick={() =>
                                                       openOperatorPicker(c, p)
@@ -1773,7 +2116,7 @@ export default function OrderPage() {
         )}
       </Modal>
 
-      {/* OPERATOR MODAL (NEW) */}
+      {/* OPERATOR MODAL */}
       <Modal
         open={openOperator}
         onClose={() => {
@@ -1869,4 +2212,3 @@ export default function OrderPage() {
       </Modal>
     </div>
   );
-}

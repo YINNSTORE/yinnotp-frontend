@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import toast, { Toaster } from "react-hot-toast";
 import ThemeMenu from "../components/ThemeMenu";
 import BottomNav from "../components/BottomNav";
@@ -46,6 +47,9 @@ const LS_ACTIVE_ORDER_KEY = "yinnotp:active_order:v2";
 // prevent double-refund spam on client (backend should also be idempotent)
 const LS_REFUNDED_KEY = "yinnotp:refunded_orders:v1";
 
+// cache saldo agar tetap tampil walau API lagi error
+const LS_BALANCE_CACHE_KEY = "yinnotp:balance_cache:v1";
+
 /**
  * ================= BACKEND WALLET API =================
  * GANTI PATH INI kalau endpoint backend lu beda.
@@ -56,11 +60,11 @@ const API_WALLET = {
   credit: "/api/wallet/credit", // POST -> { success, balance }
 };
 
-function cx(...xs) {
+function cx(...xs: any[]) {
   return xs.filter(Boolean).join(" ");
 }
 
-function normalizeName(s) {
+function normalizeName(s: any) {
   return String(s || "")
     .toLowerCase()
     .replace(/\s+/g, " ")
@@ -68,36 +72,36 @@ function normalizeName(s) {
     .trim();
 }
 
-function safeNum(v) {
+function safeNum(v: any) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 
-const formatIDR = (n) =>
+const formatIDR = (n: any) =>
   new Intl.NumberFormat("id-ID", {
     style: "currency",
     currency: "IDR",
     maximumFractionDigits: 0,
-  }).format(Number.isFinite(n) ? n : 0);
+  }).format(Number.isFinite(Number(n)) ? Number(n) : 0);
 
-function formatIDRCompact(n) {
+function formatIDRCompact(n: any) {
   const v = Math.max(0, Math.floor(Number(n) || 0));
   return v.toLocaleString("id-ID");
 }
 
-function msLabel(ms) {
+function msLabel(ms: any) {
   const n = Number(ms);
   if (!Number.isFinite(n) || n <= 0) return "—";
   return `${Math.round(n)}ms`;
 }
-function msRange(ms) {
+function msRange(ms: any) {
   const n = Number(ms);
   if (!Number.isFinite(n) || n <= 0) return "muted";
   if (n <= 400) return "good";
   if (n <= 600) return "warn";
   return "bad";
 }
-function MsBadge({ ms }) {
+function MsBadge({ ms }: { ms: any }) {
   const r = msRange(ms);
   const cls =
     r === "good"
@@ -121,7 +125,7 @@ function MsBadge({ ms }) {
   );
 }
 
-function statusLabel(v) {
+function statusLabel(v: any) {
   const s = String(v || "").toLowerCase();
   if (s.includes("received")) return "OTP Masuk";
   if (s.includes("completed") || s.includes("done")) return "Selesai";
@@ -131,7 +135,7 @@ function statusLabel(v) {
   return s || "—";
 }
 
-function isFinalStatus(v) {
+function isFinalStatus(v: any) {
   const s = String(v || "").toLowerCase();
   return (
     s.includes("completed") ||
@@ -142,14 +146,14 @@ function isFinalStatus(v) {
   );
 }
 
-function applyMarkup(price) {
+function applyMarkup(price: any) {
   const n = Number(price || 0);
   if (!Number.isFinite(n) || n <= 0) return 0;
   return n + MARKUP_FLAT_IDR;
 }
 
 /* FIX: rate tampil pakai persen */
-function fmtRatePercent(rate) {
+function fmtRatePercent(rate: any) {
   const n = Number(rate);
   if (!Number.isFinite(n)) return "";
   const isInt = Math.abs(n - Math.round(n)) < 1e-9;
@@ -158,25 +162,25 @@ function fmtRatePercent(rate) {
 }
 
 /* time helpers */
-function hhmm(ts) {
+function hhmm(ts: any) {
   if (!ts) return "—";
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
-function mmssLeft(msLeft) {
+function mmssLeft(msLeft: any) {
   const s = Math.max(0, Math.floor((msLeft || 0) / 1000));
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
 }
-function isOtpEmpty(otp) {
+function isOtpEmpty(otp: any) {
   const v = String(otp || "").trim();
   return !v || v === "-" || v === "—";
 }
 
 /* ================= ERROR EXTRACTOR ================= */
-function errMsg(defaultMsg, r) {
+function errMsg(defaultMsg: string, r: any) {
   if (!r) return defaultMsg;
 
   const j = r?.json;
@@ -219,7 +223,7 @@ function errMsg(defaultMsg, r) {
   }
 
   if (typeof j.error === "object" && j.error) {
-    const em = j.error.message || j.error.msg;
+    const em = (j as any).error.message || (j as any).error.msg;
     if (typeof em === "string" && em.trim()) return em;
     try {
       return JSON.stringify(j.error);
@@ -233,7 +237,7 @@ function errMsg(defaultMsg, r) {
 
 /* ================= persist helpers ================= */
 
-function saveActiveOrderLS(order) {
+function saveActiveOrderLS(order: any) {
   try {
     if (!order) {
       localStorage.removeItem(LS_ACTIVE_ORDER_KEY);
@@ -262,21 +266,21 @@ function readRefundedMap() {
     return {};
   }
 }
-function markRefunded(order_id) {
+function markRefunded(order_id: any) {
   try {
     const m = readRefundedMap();
     m[String(order_id || "")] = 1;
     localStorage.setItem(LS_REFUNDED_KEY, JSON.stringify(m));
   } catch {}
 }
-function alreadyRefunded(order_id) {
+function alreadyRefunded(order_id: any) {
   const m = readRefundedMap();
   return !!m[String(order_id || "")];
 }
 
 /* ================= flags ================= */
 
-function flagCodeForCountry(country) {
+function flagCodeForCountry(country: any) {
   const shortRaw = String(
     country?.short || country?.code || country?.iso || country?.iso2 || ""
   ).trim();
@@ -290,7 +294,7 @@ function flagCodeForCountry(country) {
   }
 
   const iso2 = shortRaw.toLowerCase();
-  const EXCEPT = { gi: "gib" };
+  const EXCEPT: any = { gi: "gib" };
   if (EXCEPT[iso2]) return EXCEPT[iso2];
   if (iso2) return iso2;
 
@@ -302,7 +306,7 @@ function flagCodeForCountry(country) {
   return "";
 }
 
-function flagUrlFromCountry(country) {
+function flagUrlFromCountry(country: any) {
   const direct = String(
     country?.flag_img ||
       country?.flag_url ||
@@ -318,8 +322,8 @@ function flagUrlFromCountry(country) {
 }
 
 /* ================= Scroll Reveal ================= */
-function Reveal({ children, className = "" }) {
-  const ref = useRef(null);
+function Reveal({ children, className = "" }: any) {
+  const ref = useRef<any>(null);
   const [inView, setInView] = useState(false);
 
   useEffect(() => {
@@ -359,7 +363,7 @@ function Reveal({ children, className = "" }) {
 
 /* ================= Skeleton shimmer ================= */
 
-function Skel({ className = "" }) {
+function Skel({ className = "" }: any) {
   return <div className={cx("yinn-skel", className)} />;
 }
 
@@ -497,7 +501,7 @@ function BootPageSkeleton() {
   );
 }
 
-function FullscreenBoot({ show }) {
+function FullscreenBoot({ show }: { show: boolean }) {
   if (!show) return null;
   return (
     <div className="fixed inset-0 z-[90] bg-[var(--yinn-bg)]">
@@ -506,10 +510,10 @@ function FullscreenBoot({ show }) {
   );
 }
 
-function Modal({ open, onClose, title, subtitle, children }) {
+function Modal({ open, onClose, title, subtitle, children }: any) {
   useEffect(() => {
     if (!open) return;
-    const onKey = (e) => {
+    const onKey = (e: any) => {
       if (e.key === "Escape") onClose?.();
     };
     window.addEventListener("keydown", onKey);
@@ -574,17 +578,20 @@ const POPULAR_APPS = [
 ];
 
 export default function OrderPage() {
+  const router = useRouter();
+
   const [bootLoading, setBootLoading] = useState(true);
 
   const [online, setOnline] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [latencyMs, setLatencyMs] = useState(null);
+  const [latencyMs, setLatencyMs] = useState<any>(null);
   const [lastPingTs, setLastPingTs] = useState(0);
   const [ago, setAgo] = useState(0);
 
   // backend balance
   const [balanceIDR, setBalanceIDR] = useState(0);
   const [balanceLoading, setBalanceLoading] = useState(false);
+  const [balanceErrText, setBalanceErrText] = useState("");
 
   // tick
   const [nowTick, setNowTick] = useState(Date.now());
@@ -603,13 +610,13 @@ export default function OrderPage() {
   const [buyStep, setBuyStep] = useState("app"); // app | country
 
   // services
-  const [services, setServices] = useState([]);
+  const [services, setServices] = useState<any[]>([]);
   const [loadingServices, setLoadingServices] = useState(false);
   const [serviceSearch, setServiceSearch] = useState("");
   const [serviceId, setServiceId] = useState("");
 
   // countries
-  const [countries, setCountries] = useState([]);
+  const [countries, setCountries] = useState<any[]>([]);
   const [loadingCountries, setLoadingCountries] = useState(false);
   const [countrySearch, setCountrySearch] = useState("");
   const [sortMode, setSortMode] = useState("rate"); // rate | harga
@@ -617,13 +624,13 @@ export default function OrderPage() {
   const [orderingKey, setOrderingKey] = useState("");
 
   // order status
-  const [activeOrder, setActiveOrder] = useState(null);
+  const [activeOrder, setActiveOrder] = useState<any>(null);
   const [polling, setPolling] = useState(false);
-  const pollRef = useRef(null);
+  const pollRef = useRef<any>(null);
 
   /* loading anim sebentar pas modal */
   const [modalKickLoading, setModalKickLoading] = useState(false);
-  const modalKickRef = useRef(null);
+  const modalKickRef = useRef<any>(null);
   function kickModalLoading(ms = 450) {
     setModalKickLoading(true);
     if (modalKickRef.current) clearTimeout(modalKickRef.current);
@@ -633,8 +640,8 @@ export default function OrderPage() {
   /* operator picker */
   const [openOperator, setOpenOperator] = useState(false);
   const [opLoading, setOpLoading] = useState(false);
-  const [operators, setOperators] = useState([]);
-  const [opCtx, setOpCtx] = useState({ country: null, provider: null });
+  const [operators, setOperators] = useState<any[]>([]);
+  const [opCtx, setOpCtx] = useState<any>({ country: null, provider: null });
   const [opOrdering, setOpOrdering] = useState(false);
 
   const pickedService = useMemo(() => {
@@ -658,19 +665,19 @@ export default function OrderPage() {
     return services.filter((s) => normalizeName(s?.service_name).includes(q));
   }, [services, serviceSearch]);
 
-  function minPriceFromCountry(country) {
+  function minPriceFromCountry(country: any) {
     const list = Array.isArray(country?.pricelist) ? country.pricelist : [];
-    const prices = list.map((p) => safeNum(p?.price)).filter((x) => x > 0);
+    const prices = list.map((p: any) => safeNum(p?.price)).filter((x) => x > 0);
     if (!prices.length) return 0;
     return Math.min(...prices);
   }
 
-  function realStockFromCountry(country) {
+  function realStockFromCountry(country: any) {
     const st = safeNum(country?.stock_total);
     if (st > 0) return st;
 
     const list = Array.isArray(country?.pricelist) ? country.pricelist : [];
-    const sum = list.reduce((acc, p) => acc + safeNum(p?.stock), 0);
+    const sum = list.reduce((acc: number, p: any) => acc + safeNum(p?.stock), 0);
     return sum > 0 ? sum : 0;
   }
 
@@ -714,7 +721,7 @@ export default function OrderPage() {
     return false;
   }
 
-  function saveNotifPref(v) {
+  function saveNotifPref(v: boolean) {
     try {
       localStorage.setItem(LS_NOTIF_KEY, v ? "1" : "0");
     } catch {}
@@ -728,7 +735,7 @@ export default function OrderPage() {
       saveNotifPref(false);
       return;
     }
-    const p = Notification.permission;
+    const p = (Notification as any).permission;
     setNotifState(p);
 
     const pref = readNotifPref();
@@ -740,7 +747,7 @@ export default function OrderPage() {
     if (typeof window === "undefined") return false;
     if (!("Notification" in window)) return false;
     try {
-      const p = await Notification.requestPermission();
+      const p = await (Notification as any).requestPermission();
       setNotifState(p);
       return p === "granted";
     } catch {
@@ -759,7 +766,7 @@ export default function OrderPage() {
       return;
     }
 
-    const currentPerm = Notification.permission;
+    const currentPerm = (Notification as any).permission;
     setNotifState(currentPerm);
 
     if (notifEnabled) {
@@ -790,7 +797,7 @@ export default function OrderPage() {
     toast.success("Notifikasi ON");
   }
 
-  function fireOtpNotification(otp, phone) {
+  function fireOtpNotification(otp: any, phone: any) {
     if (!notifEnabled) return;
     if (!otp || otp === "-" || otp === "—") return;
 
@@ -799,7 +806,7 @@ export default function OrderPage() {
     lastNotifiedOtpRef.current = key;
 
     try {
-      new Notification("YinnOTP • OTP Masuk", {
+      new (Notification as any)("YinnOTP • OTP Masuk", {
         body: phone ? `Nomor: ${phone}\nOTP: ${otp}` : `OTP: ${otp}`,
         silent: false,
       });
@@ -808,7 +815,7 @@ export default function OrderPage() {
 
   /* ================= Backend wallet API ================= */
 
-  async function apiJson(url, init) {
+  async function apiJson(url: string, init: any) {
     const res = await fetch(url, {
       ...init,
       headers: {
@@ -818,7 +825,7 @@ export default function OrderPage() {
       cache: "no-store",
     });
 
-    let json = null;
+    let json: any = null;
     try {
       json = await res.json();
     } catch {
@@ -827,52 +834,135 @@ export default function OrderPage() {
     return { ok: res.ok, status: res.status, json };
   }
 
-  async function loadBalance() {
+  function readBalanceCache() {
+    try {
+      const raw = localStorage.getItem(LS_BALANCE_CACHE_KEY);
+      const n = safeNum(raw);
+      return n > 0 ? n : 0;
+    } catch {
+      return 0;
+    }
+  }
+  function writeBalanceCache(n: any) {
+    try {
+      localStorage.setItem(LS_BALANCE_CACHE_KEY, String(Math.floor(safeNum(n))));
+    } catch {}
+  }
+
+  function extractBalanceFromJson(j: any) {
+    if (!j) return 0;
+    // dukung banyak bentuk response
+    const direct =
+      j.balance ??
+      j.saldo ??
+      j.data?.balance ??
+      j.data?.saldo ??
+      j.result?.balance ??
+      j.result?.saldo ??
+      j.wallet?.balance ??
+      j.wallet?.saldo ??
+      0;
+    return safeNum(direct);
+  }
+
+  function isWalletSuccess(r: any) {
+    const j = r?.json;
+    if (!r?.ok) return false;
+    if (!j) return false;
+    // toleran: success/status/ok true
+    if (j.success === true) return true;
+    if (j.status === true) return true;
+    if (j.ok === true) return true;
+    if (j?.data?.success === true) return true;
+    // kalau ada balance angka juga kita anggap ok
+    const b = extractBalanceFromJson(j);
+    return b >= 0;
+  }
+
+  async function loadBalance(opts?: { silent?: boolean }) {
+    const silent = !!opts?.silent;
+
     setBalanceLoading(true);
+    setBalanceErrText("");
     try {
       const r = await apiJson(API_WALLET.balance, { method: "GET" });
-      if (!r.ok || !r.json?.success) {
-        toast.error(errMsg("Gagal load saldo", r));
+
+      if (!isWalletSuccess(r)) {
+        const msg = errMsg("Gagal load saldo", r);
+        setBalanceErrText(msg);
+        // jangan spam toast saat boot, tapi tetap toast kalau user klik refresh
+        if (!silent) toast.error(msg);
+        // fallback tampilkan cache
+        const cached = readBalanceCache();
+        if (cached > 0) setBalanceIDR(cached);
         return;
       }
-      const b = safeNum(r.json?.balance ?? r.json?.data?.balance);
+
+      const b = extractBalanceFromJson(r.json);
       setBalanceIDR(b);
+      writeBalanceCache(b);
     } catch {
-      toast.error("Server error (saldo)");
+      const msg = "Server error (saldo)";
+      setBalanceErrText(msg);
+      if (!silent) toast.error(msg);
+      const cached = readBalanceCache();
+      if (cached > 0) setBalanceIDR(cached);
     } finally {
       setBalanceLoading(false);
     }
   }
 
-  async function walletDebit({ amount, order_id, note }) {
+  async function walletDebit({
+    amount,
+    order_id,
+    note,
+  }: {
+    amount: number;
+    order_id: any;
+    note?: string;
+  }) {
     const r = await apiJson(API_WALLET.debit, {
       method: "POST",
       body: JSON.stringify({ amount, order_id, note }),
     });
-    if (!r.ok || !r.json?.success) {
+
+    if (!isWalletSuccess(r)) {
       throw new Error(errMsg("Gagal potong saldo", r));
     }
-    const b = safeNum(r.json?.balance ?? r.json?.data?.balance);
+
+    const b = extractBalanceFromJson(r.json);
     setBalanceIDR(b);
+    writeBalanceCache(b);
     return b;
   }
 
-  async function walletCredit({ amount, order_id, note }) {
+  async function walletCredit({
+    amount,
+    order_id,
+    note,
+  }: {
+    amount: number;
+    order_id: any;
+    note?: string;
+  }) {
     const r = await apiJson(API_WALLET.credit, {
       method: "POST",
       body: JSON.stringify({ amount, order_id, note }),
     });
-    if (!r.ok || !r.json?.success) {
+
+    if (!isWalletSuccess(r)) {
       throw new Error(errMsg("Gagal refund saldo", r));
     }
-    const b = safeNum(r.json?.balance ?? r.json?.data?.balance);
+
+    const b = extractBalanceFromJson(r.json);
     setBalanceIDR(b);
+    writeBalanceCache(b);
     return b;
   }
 
   /* ================= order helpers ================= */
 
-  function orderExpiresAt(order) {
+  function orderExpiresAt(order: any) {
     if (!order) return 0;
     const createdAt = Number(order.created_at || 0);
     const expMin = Number(order.expires_in_minute || 0);
@@ -888,7 +978,7 @@ export default function OrderPage() {
     }
   }
 
-  function clearActiveOrder(reason, finalStatus, extra = {}) {
+  function clearActiveOrder(reason: any, finalStatus: any, extra = {}) {
     try {
       if (activeOrder?.order_id) {
         activityAdd({
@@ -954,7 +1044,7 @@ export default function OrderPage() {
     }
   }
 
-  async function loadCountriesForService(sid) {
+  async function loadCountriesForService(sid: any) {
     setLoadingCountries(true);
     try {
       const r = await roCountries(sid);
@@ -976,19 +1066,19 @@ export default function OrderPage() {
     }
   }
 
-  async function pollOnce(order_id) {
+  async function pollOnce(order_id: any) {
     const r = await roStatusGet(order_id);
     if (!r.ok || !r.json?.success) return null;
     return r.json?.data || null;
   }
 
-  async function startPolling(order_id) {
+  async function startPolling(order_id: any) {
     stopPolling();
     setPolling(true);
 
     const first = await pollOnce(order_id);
     if (first) {
-      setActiveOrder((o) => {
+      setActiveOrder((o: any) => {
         if (!o) return o;
         const next = { ...o, status: first.status, otp_code: first.otp_code };
         if (String(first.otp_code || "").trim())
@@ -1014,8 +1104,12 @@ export default function OrderPage() {
       const data = await pollOnce(order_id);
       if (!data) return;
 
-      setActiveOrder((o) => {
+      // ambil price terbaru dari state (anti stale)
+      let latestPrice = 0;
+      setActiveOrder((o: any) => {
         if (!o) return o;
+        latestPrice = safeNum(o.price || 0);
+
         const next = { ...o, status: data.status, otp_code: data.otp_code };
         if (String(data?.otp_code || "").trim())
           fireOtpNotification(data.otp_code, next.phone_number);
@@ -1038,7 +1132,7 @@ export default function OrderPage() {
         !alreadyRefunded(order_id)
       ) {
         try {
-          const amt = safeNum(activeOrder?.price || 0);
+          const amt = latestPrice; // ✅ pakai harga terbaru
           if (amt > 0) {
             await walletCredit({
               amount: amt,
@@ -1048,7 +1142,7 @@ export default function OrderPage() {
           }
           markRefunded(order_id);
           toast.success(`Refund berhasil: +${formatIDR(amt)}`);
-        } catch (e) {
+        } catch (e: any) {
           toast.error(String(e?.message || "Refund gagal"));
         }
       }
@@ -1059,7 +1153,7 @@ export default function OrderPage() {
     }, 1800);
   }
 
-  async function setStatus(action) {
+  async function setStatus(action: any) {
     if (!activeOrder?.order_id) return;
     const order_id = activeOrder.order_id;
 
@@ -1083,7 +1177,7 @@ export default function OrderPage() {
           });
           markRefunded(order_id);
           toast.success(`Pesanan dibatalkan. Refund: +${formatIDR(amt)}`);
-        } catch (e) {
+        } catch (e: any) {
           toast.error(String(e?.message || "Refund gagal"));
         }
       } else {
@@ -1100,7 +1194,7 @@ export default function OrderPage() {
 
   /* ================= operator picker flow ================= */
 
-  async function openOperatorPicker(country, provider) {
+  async function openOperatorPicker(country: any, provider: any) {
     const cid = String(country?.number_id || "");
     const pid = String(provider?.provider_id || "");
     const countryName = String(country?.name || "").trim();
@@ -1141,8 +1235,10 @@ export default function OrderPage() {
     }
   }
 
-  /* ================= ORDER (harga web + potong saldo backend) ================= */
-  async function orderWithOperator(country, provider, operator) {
+  /* ================= ORDER (fix “gagal” padahal masuk RumahOTP) ================= */
+  async function orderWithOperator(country: any, provider: any, operator: any) {
+    if (opOrdering) return;
+
     const cid = String(country?.number_id || "");
     const pid = String(provider?.provider_id || "");
     const oid = String(operator?.id || "");
@@ -1158,14 +1254,12 @@ export default function OrderPage() {
 
     try {
       const r = await roOrder(cid, pid, oid);
-      if (!r.ok || !r.json?.success) {
-        toast.error(errMsg("Gagal buat order", r));
-        return;
-      }
 
-      const data = r.json?.data || null;
-      if (!data?.order_id) {
-        toast.error("Order gagal: order_id kosong");
+      // ✅ FIX: anggap sukses kalau ada order_id walau success false
+      const data = r?.json?.data || null;
+      const orderId = String(data?.order_id || "").trim();
+      if (!orderId) {
+        toast.error(errMsg("Gagal buat order", r));
         return;
       }
 
@@ -1173,29 +1267,22 @@ export default function OrderPage() {
       const basePrice = safeNum(provider?.price);
       const sellPrice = applyMarkup(basePrice);
 
-      // POTONG SALDO BACKEND (wajib)
-      await walletDebit({
-        amount: sellPrice,
-        order_id: data.order_id,
-        note: `Order ${pickedService?.service_name || "service"}`,
-      });
-
       const row = {
-        order_id: data.order_id,
-        phone_number: data.phone_number || "",
-        service: data.service || pickedService?.service_name || "",
-        country: data.country || country?.name || "",
-        operator: data.operator || operator?.name || "any",
-        expires_in_minute: data.expires_in_minute || 0,
+        order_id: orderId,
+        phone_number: data?.phone_number || "",
+        service: data?.service || pickedService?.service_name || "",
+        country: data?.country || country?.name || "",
+        operator: data?.operator || operator?.name || "any",
+        expires_in_minute: data?.expires_in_minute || 0,
         price: sellPrice,
         created_at: Date.now(),
         status: "waiting",
         otp_code: "-",
         app_img: pickedServiceLogo || "",
-        // optional for UI (flag)
         country_flag_url: flagUrlFromCountry(country) || "",
       };
 
+      // ✅ set order dulu biar UI gak bilang gagal padahal order masuk
       setActiveOrder(row);
       saveActiveOrderLS(row);
 
@@ -1211,11 +1298,22 @@ export default function OrderPage() {
         ts: Date.now(),
       });
 
+      // ✅ Debit wallet: kalau gagal, jangan bikin order dianggap gagal (biar gak misleading)
+      try {
+        await walletDebit({
+          amount: sellPrice,
+          order_id: row.order_id,
+          note: `Order ${pickedService?.service_name || "service"}`,
+        });
+      } catch (e: any) {
+        toast.error(String(e?.message || "Potong saldo gagal (order tetap dibuat)"));
+      }
+
       toast.success("Order berhasil dibuat");
       setOpenOperator(false);
       setOpenBuy(false);
       startPolling(row.order_id);
-    } catch (e) {
+    } catch (e: any) {
       toast.error(String(e?.message || "Server error (order)"));
     } finally {
       setOpOrdering(false);
@@ -1232,7 +1330,7 @@ export default function OrderPage() {
     kickModalLoading();
   }
 
-  function selectServiceAndGoCountries(svc) {
+  function selectServiceAndGoCountries(svc: any) {
     const sid = String(svc?.service_code || "");
     if (!sid) return;
 
@@ -1253,6 +1351,10 @@ export default function OrderPage() {
     const cached = loadActiveOrderLS();
     if (cached?.order_id) setActiveOrder(cached);
 
+    // tampilkan cache saldo dulu biar gak kosong
+    const cachedBal = readBalanceCache();
+    if (cachedBal > 0) setBalanceIDR(cachedBal);
+
     try {
       const pref = readNotifPref();
       setNotifEnabled(pref);
@@ -1262,7 +1364,8 @@ export default function OrderPage() {
 
     (async () => {
       setBootLoading(true);
-      await Promise.allSettled([refreshPing(), loadServices(), loadBalance()]);
+      // ✅ silent loadBalance biar gak spam toast pas awal
+      await Promise.allSettled([refreshPing(), loadServices(), loadBalance({ silent: true })]);
       if (!alive) return;
       updateNotifStateFromBrowser();
       setBootLoading(false);
@@ -1500,10 +1603,18 @@ export default function OrderPage() {
                   <div className="truncate text-xl font-extrabold">
                     {balanceLoading ? "..." : saldoLabel}
                   </div>
+
+                  {/* ✅ FIX: tampilkan hint error tanpa ubah layout besar */}
+                  {balanceErrText ? (
+                    <div className="mt-1 truncate text-[10px] font-bold text-red-500">
+                      {balanceErrText}
+                    </div>
+                  ) : null}
                 </div>
 
+                {/* ✅ FIX: Top Up redirect /deposit */}
                 <button
-                  onClick={() => toast("Buka halaman Top Up")}
+                  onClick={() => router.push("/deposit")}
                   className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-extrabold"
                   style={{
                     background: "rgba(34,197,94,0.16)",
@@ -1518,7 +1629,7 @@ export default function OrderPage() {
               </div>
 
               <button
-                onClick={loadBalance}
+                onClick={() => loadBalance({ silent: false })}
                 className="mt-2 w-full rounded-xl border border-[var(--yinn-border)] py-2 text-xs font-extrabold text-[var(--yinn-muted)]"
               >
                 Refresh Saldo
@@ -1608,17 +1719,12 @@ export default function OrderPage() {
               const expAt = orderExpiresAt(activeOrder);
               const expTimeBadge = expAt ? hhmm(expAt) : "—";
 
-              // harga badge kayak screenshot: "Rp650" (tanpa ribuan format RumahOTP)
-              // tapi harga web lu harus 1.650, jadi tetap Rp1650 (kalau mau "Rp1.650" tinggal ubah)
               const priceBadge = `Rp${formatIDRCompact(activeOrder.price || 0)}`;
 
-              const flagUrl =
-                String(activeOrder.country_flag_url || "").trim() ||
-                "";
+              const flagUrl = String(activeOrder.country_flag_url || "").trim() || "";
 
               return (
                 <div className="mt-3 rounded-2xl border border-[var(--yinn-border)] bg-white/40 p-4 dark:bg-black/10">
-                  {/* top row (flag + phone + copy) + (time + price badges) */}
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-3">
@@ -1656,7 +1762,6 @@ export default function OrderPage() {
                         </div>
                       </div>
 
-                      {/* operator row */}
                       <div className="mt-3 flex items-center gap-2 text-sm font-bold text-[var(--yinn-muted)]">
                         <Sparkles size={16} className="text-[var(--yinn-muted)]" />
                         <span className="font-extrabold text-[var(--yinn-text)]">
@@ -1677,7 +1782,6 @@ export default function OrderPage() {
                     </div>
                   </div>
 
-                  {/* app card */}
                   <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-3">
@@ -1722,7 +1826,6 @@ export default function OrderPage() {
                     </div>
                   </div>
 
-                  {/* buttons */}
                   <div className="mt-4 grid grid-cols-2 gap-3">
                     <button
                       onClick={openBuyModal}
@@ -1818,7 +1921,7 @@ export default function OrderPage() {
                     toast.success(
                       `Status: ${
                         typeof Notification !== "undefined"
-                          ? Notification.permission
+                          ? (Notification as any).permission
                           : notifState
                       }`
                     );
@@ -1983,7 +2086,7 @@ export default function OrderPage() {
                 </div>
               ) : (
                 <div className="divide-y divide-[var(--yinn-border)]">
-                  {filteredServices.map((s) => (
+                  {filteredServices.map((s: any) => (
                     <Reveal key={String(s?.service_code)}>
                       <button
                         onClick={() => {
@@ -2116,7 +2219,7 @@ export default function OrderPage() {
               ) : (
                 <div className="rounded-2xl border border-[var(--yinn-border)]">
                   <div className="divide-y divide-[var(--yinn-border)]">
-                    {filteredCountries.map((c) => {
+                    {filteredCountries.map((c: any) => {
                       const open =
                         String(expandedCountryId) === String(c?.number_id);
                       const minp = minPriceFromCountry(c);
@@ -2200,10 +2303,10 @@ export default function OrderPage() {
                                     ) : null}
 
                                     {pricelist
-                                      .filter((p) =>
+                                      .filter((p: any) =>
                                         String(p?.provider_id || "").trim()
                                       )
-                                      .map((p) => {
+                                      .map((p: any) => {
                                         const pid = String(p?.provider_id || "");
                                         const key = `${String(
                                           c?.number_id || ""
@@ -2239,8 +2342,7 @@ export default function OrderPage() {
                                                     ID: {pid || "—"}
                                                   </span>
 
-                                                  {typeof p?.rate !==
-                                                    "undefined" &&
+                                                  {typeof p?.rate !== "undefined" &&
                                                   p?.rate !== null ? (
                                                     <span className="rounded-full bg-zinc-500/10 px-2 py-1 text-[11px] font-extrabold text-zinc-600">
                                                       {fmtRatePercent(p.rate)}

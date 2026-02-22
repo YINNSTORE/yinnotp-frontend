@@ -16,6 +16,14 @@ import {
   ChevronLeft,
   Bell,
   BellOff,
+  Copy,
+  Clock,
+  Mail,
+  ShoppingBag,
+  XCircle,
+  Wallet,
+  ExternalLink,
+  Sparkles,
 } from "lucide-react";
 import {
   ping,
@@ -33,10 +41,20 @@ import { activityAdd } from "../_lib/activityStore";
 const MARKUP_FLAT_IDR = 1000;
 const LS_NOTIF_KEY = "yinnotp:notif_enabled:v1";
 
-// active order + saldo (frontend) persistence
-const LS_ACTIVE_ORDER_KEY = "yinnotp:active_order:v1";
-const LS_BALANCE_KEY = "yinnotp:saldo_idr:v1";
+// persist active order only
+const LS_ACTIVE_ORDER_KEY = "yinnotp:active_order:v2";
+// prevent double-refund spam on client (backend should also be idempotent)
 const LS_REFUNDED_KEY = "yinnotp:refunded_orders:v1";
+
+/**
+ * ================= BACKEND WALLET API =================
+ * GANTI PATH INI kalau endpoint backend lu beda.
+ */
+const API_WALLET = {
+  balance: "/api/wallet/balance", // GET  -> { success, balance }
+  debit: "/api/wallet/debit", // POST -> { success, balance }
+  credit: "/api/wallet/credit", // POST -> { success, balance }
+};
 
 function cx(...xs) {
   return xs.filter(Boolean).join(" ");
@@ -50,6 +68,11 @@ function normalizeName(s) {
     .trim();
 }
 
+function safeNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 const formatIDR = (n) =>
   new Intl.NumberFormat("id-ID", {
     style: "currency",
@@ -57,12 +80,16 @@ const formatIDR = (n) =>
     maximumFractionDigits: 0,
   }).format(Number.isFinite(n) ? n : 0);
 
+function formatIDRCompact(n) {
+  const v = Math.max(0, Math.floor(Number(n) || 0));
+  return v.toLocaleString("id-ID");
+}
+
 function msLabel(ms) {
   const n = Number(ms);
   if (!Number.isFinite(n) || n <= 0) return "—";
   return `${Math.round(n)}ms`;
 }
-
 function msRange(ms) {
   const n = Number(ms);
   if (!Number.isFinite(n) || n <= 0) return "muted";
@@ -70,7 +97,6 @@ function msRange(ms) {
   if (n <= 600) return "warn";
   return "bad";
 }
-
 function MsBadge({ ms }) {
   const r = msRange(ms);
   const cls =
@@ -101,7 +127,6 @@ function statusLabel(v) {
   if (s.includes("completed") || s.includes("done")) return "Selesai";
   if (s.includes("canceled") || s.includes("cancel")) return "Dibatalkan";
   if (s.includes("expired")) return "Expired";
-  if (s.includes("expiring")) return "Hampir Habis";
   if (s.includes("waiting") || s.includes("pending")) return "Menunggu";
   return s || "—";
 }
@@ -117,34 +142,13 @@ function isFinalStatus(v) {
   );
 }
 
-function safeNum(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function minPriceFromCountry(country) {
-  const list = Array.isArray(country?.pricelist) ? country.pricelist : [];
-  const prices = list.map((p) => safeNum(p?.price)).filter((x) => x > 0);
-  if (!prices.length) return 0;
-  return Math.min(...prices);
-}
-
-function realStockFromCountry(country) {
-  const st = safeNum(country?.stock_total);
-  if (st > 0) return st;
-
-  const list = Array.isArray(country?.pricelist) ? country.pricelist : [];
-  const sum = list.reduce((acc, p) => acc + safeNum(p?.stock), 0);
-  return sum > 0 ? sum : 0;
-}
-
 function applyMarkup(price) {
   const n = Number(price || 0);
   if (!Number.isFinite(n) || n <= 0) return 0;
   return n + MARKUP_FLAT_IDR;
 }
 
-/* FIX: rate tampil pakai persen seperti RumahOTP */
+/* FIX: rate tampil pakai persen */
 function fmtRatePercent(rate) {
   const n = Number(rate);
   if (!Number.isFinite(n)) return "";
@@ -171,7 +175,7 @@ function isOtpEmpty(otp) {
   return !v || v === "-" || v === "—";
 }
 
-/* ================= FIX ERROR EXTRACTOR (BIAR GAK [object Object]) ================= */
+/* ================= ERROR EXTRACTOR ================= */
 function errMsg(defaultMsg, r) {
   if (!r) return defaultMsg;
 
@@ -227,30 +231,26 @@ function errMsg(defaultMsg, r) {
   return msg && String(msg).trim() ? msg : defaultMsg;
 }
 
-/* ================= saldo local helpers =================
-   Dipake buat "saldo web" versi local. Kalau saldo lu dari backend:
-   - replace balanceDelta() dengan request API (debit/kredit)
-*/
-function getLocalBalance() {
+/* ================= persist helpers ================= */
+
+function saveActiveOrderLS(order) {
   try {
-    const v = Number(localStorage.getItem(LS_BALANCE_KEY));
-    return Number.isFinite(v) ? v : 0;
-  } catch {
-    return 0;
-  }
-}
-function setLocalBalance(v) {
-  try {
-    localStorage.setItem(
-      LS_BALANCE_KEY,
-      String(Math.max(0, Math.floor(v || 0)))
-    );
-    window.dispatchEvent(new CustomEvent("yinnotp:balance_changed"));
+    if (!order) {
+      localStorage.removeItem(LS_ACTIVE_ORDER_KEY);
+      return;
+    }
+    localStorage.setItem(LS_ACTIVE_ORDER_KEY, JSON.stringify(order));
   } catch {}
 }
-function balanceDelta(delta) {
-  const cur = getLocalBalance();
-  setLocalBalance(cur + Number(delta || 0));
+function loadActiveOrderLS() {
+  try {
+    const raw = localStorage.getItem(LS_ACTIVE_ORDER_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    return obj && obj.order_id ? obj : null;
+  } catch {
+    return null;
+  }
 }
 
 function readRefundedMap() {
@@ -272,26 +272,6 @@ function markRefunded(order_id) {
 function alreadyRefunded(order_id) {
   const m = readRefundedMap();
   return !!m[String(order_id || "")];
-}
-
-function saveActiveOrderLS(order) {
-  try {
-    if (!order) {
-      localStorage.removeItem(LS_ACTIVE_ORDER_KEY);
-      return;
-    }
-    localStorage.setItem(LS_ACTIVE_ORDER_KEY, JSON.stringify(order));
-  } catch {}
-}
-function loadActiveOrderLS() {
-  try {
-    const raw = localStorage.getItem(LS_ACTIVE_ORDER_KEY);
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    return obj && obj.order_id ? obj : null;
-  } catch {
-    return null;
-  }
 }
 
 /* ================= flags ================= */
@@ -337,7 +317,7 @@ function flagUrlFromCountry(country) {
   return `https://assets.rumahotp.com/flags/${code}.png`;
 }
 
-/* ================= Scroll Reveal (IntersectionObserver) ================= */
+/* ================= Scroll Reveal ================= */
 function Reveal({ children, className = "" }) {
   const ref = useRef(null);
   const [inView, setInView] = useState(false);
@@ -368,8 +348,8 @@ function Reveal({ children, className = "" }) {
       className={cx("will-change-transform", className)}
       style={{
         opacity: inView ? 1 : 0,
-        transform: inView ? "scale(1)" : "scale(0.8)",
-        transition: "transform 320ms ease-out, opacity 320ms ease-out",
+        transform: inView ? "scale(1)" : "scale(0.96)",
+        transition: "transform 260ms ease-out, opacity 260ms ease-out",
       }}
     >
       {children}
@@ -602,17 +582,18 @@ export default function OrderPage() {
   const [lastPingTs, setLastPingTs] = useState(0);
   const [ago, setAgo] = useState(0);
 
-  // saldo (local)
+  // backend balance
   const [balanceIDR, setBalanceIDR] = useState(0);
+  const [balanceLoading, setBalanceLoading] = useState(false);
 
-  // tick buat countdown (pending UI)
+  // tick
   const [nowTick, setNowTick] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNowTick(Date.now()), 250);
     return () => clearInterval(t);
   }, []);
 
-  // notifikasi realtime
+  // notifikasi
   const [notifEnabled, setNotifEnabled] = useState(false);
   const [notifState, setNotifState] = useState("unsupported");
   const lastNotifiedOtpRef = useRef("");
@@ -649,7 +630,7 @@ export default function OrderPage() {
     modalKickRef.current = setTimeout(() => setModalKickLoading(false), ms);
   }
 
-  /* ================== operator picker modal ================== */
+  /* operator picker */
   const [openOperator, setOpenOperator] = useState(false);
   const [opLoading, setOpLoading] = useState(false);
   const [operators, setOperators] = useState([]);
@@ -676,6 +657,22 @@ export default function OrderPage() {
     if (!q) return services;
     return services.filter((s) => normalizeName(s?.service_name).includes(q));
   }, [services, serviceSearch]);
+
+  function minPriceFromCountry(country) {
+    const list = Array.isArray(country?.pricelist) ? country.pricelist : [];
+    const prices = list.map((p) => safeNum(p?.price)).filter((x) => x > 0);
+    if (!prices.length) return 0;
+    return Math.min(...prices);
+  }
+
+  function realStockFromCountry(country) {
+    const st = safeNum(country?.stock_total);
+    if (st > 0) return st;
+
+    const list = Array.isArray(country?.pricelist) ? country.pricelist : [];
+    const sum = list.reduce((acc, p) => acc + safeNum(p?.stock), 0);
+    return sum > 0 ? sum : 0;
+  }
 
   const filteredCountries = useMemo(() => {
     const q = normalizeName(countrySearch);
@@ -809,6 +806,70 @@ export default function OrderPage() {
     } catch {}
   }
 
+  /* ================= Backend wallet API ================= */
+
+  async function apiJson(url, init) {
+    const res = await fetch(url, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers || {}),
+      },
+      cache: "no-store",
+    });
+
+    let json = null;
+    try {
+      json = await res.json();
+    } catch {
+      json = null;
+    }
+    return { ok: res.ok, status: res.status, json };
+  }
+
+  async function loadBalance() {
+    setBalanceLoading(true);
+    try {
+      const r = await apiJson(API_WALLET.balance, { method: "GET" });
+      if (!r.ok || !r.json?.success) {
+        toast.error(errMsg("Gagal load saldo", r));
+        return;
+      }
+      const b = safeNum(r.json?.balance ?? r.json?.data?.balance);
+      setBalanceIDR(b);
+    } catch {
+      toast.error("Server error (saldo)");
+    } finally {
+      setBalanceLoading(false);
+    }
+  }
+
+  async function walletDebit({ amount, order_id, note }) {
+    const r = await apiJson(API_WALLET.debit, {
+      method: "POST",
+      body: JSON.stringify({ amount, order_id, note }),
+    });
+    if (!r.ok || !r.json?.success) {
+      throw new Error(errMsg("Gagal potong saldo", r));
+    }
+    const b = safeNum(r.json?.balance ?? r.json?.data?.balance);
+    setBalanceIDR(b);
+    return b;
+  }
+
+  async function walletCredit({ amount, order_id, note }) {
+    const r = await apiJson(API_WALLET.credit, {
+      method: "POST",
+      body: JSON.stringify({ amount, order_id, note }),
+    });
+    if (!r.ok || !r.json?.success) {
+      throw new Error(errMsg("Gagal refund saldo", r));
+    }
+    const b = safeNum(r.json?.balance ?? r.json?.data?.balance);
+    setBalanceIDR(b);
+    return b;
+  }
+
   /* ================= order helpers ================= */
 
   function orderExpiresAt(order) {
@@ -819,8 +880,15 @@ export default function OrderPage() {
     return createdAt + expMin * 60 * 1000;
   }
 
+  function stopPolling() {
+    setPolling(false);
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
   function clearActiveOrder(reason, finalStatus, extra = {}) {
-    // push detail ke Activity
     try {
       if (activeOrder?.order_id) {
         activityAdd({
@@ -847,7 +915,7 @@ export default function OrderPage() {
     saveActiveOrderLS(null);
   }
 
-  /* ================= API ================= */
+  /* ================= Provider API ================= */
 
   async function refreshPing() {
     setChecking(true);
@@ -908,14 +976,6 @@ export default function OrderPage() {
     }
   }
 
-  function stopPolling() {
-    setPolling(false);
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }
-
   async function pollOnce(order_id) {
     const r = await roStatusGet(order_id);
     if (!r.ok || !r.json?.success) return null;
@@ -933,19 +993,6 @@ export default function OrderPage() {
         const next = { ...o, status: first.status, otp_code: first.otp_code };
         if (String(first.otp_code || "").trim())
           fireOtpNotification(first.otp_code, next.phone_number);
-
-        // auto-refund kalau cancel & OTP kosong & belum pernah refund
-        const st = String(first.status || "").toLowerCase();
-        if (
-          (st.includes("cancel") || st.includes("canceled")) &&
-          isOtpEmpty(first.otp_code) &&
-          !alreadyRefunded(order_id)
-        ) {
-          balanceDelta(+Number(next.price || 0));
-          markRefunded(order_id);
-          toast.success(`Refund berhasil: +${formatIDR(Number(next.price || 0))}`);
-        }
-
         return next;
       });
 
@@ -958,7 +1005,6 @@ export default function OrderPage() {
       });
 
       if (isFinalStatus(first.status)) {
-        // auto clear pending card -> pindah ke activity
         clearActiveOrder("final_status", first.status, { final_from_poll: 1 });
         return;
       }
@@ -973,18 +1019,6 @@ export default function OrderPage() {
         const next = { ...o, status: data.status, otp_code: data.otp_code };
         if (String(data?.otp_code || "").trim())
           fireOtpNotification(data.otp_code, next.phone_number);
-
-        const st = String(data.status || "").toLowerCase();
-        if (
-          (st.includes("cancel") || st.includes("canceled")) &&
-          isOtpEmpty(data.otp_code) &&
-          !alreadyRefunded(order_id)
-        ) {
-          balanceDelta(+Number(next.price || 0));
-          markRefunded(order_id);
-          toast.success(`Refund berhasil: +${formatIDR(Number(next.price || 0))}`);
-        }
-
         return next;
       });
 
@@ -995,6 +1029,29 @@ export default function OrderPage() {
         otp_code: data.otp_code,
         ts: Date.now(),
       });
+
+      // refund otomatis kalau cancel & otp kosong (sekali)
+      const st = String(data.status || "").toLowerCase();
+      if (
+        (st.includes("cancel") || st.includes("canceled")) &&
+        isOtpEmpty(data.otp_code) &&
+        !alreadyRefunded(order_id)
+      ) {
+        try {
+          const amt = safeNum(activeOrder?.price || 0);
+          if (amt > 0) {
+            await walletCredit({
+              amount: amt,
+              order_id,
+              note: "Refund cancel (OTP kosong)",
+            });
+          }
+          markRefunded(order_id);
+          toast.success(`Refund berhasil: +${formatIDR(amt)}`);
+        } catch (e) {
+          toast.error(String(e?.message || "Refund gagal"));
+        }
+      }
 
       if (isFinalStatus(data.status)) {
         clearActiveOrder("final_status", data.status, { final_from_poll: 1 });
@@ -1012,22 +1069,27 @@ export default function OrderPage() {
       return;
     }
 
-    // cancel: refund kalau OTP belum ada (sekali)
     if (action === "cancel") {
+      // refund kalau OTP belum ada (sekali)
       const otpEmpty = isOtpEmpty(activeOrder?.otp_code);
-      if (otpEmpty && !alreadyRefunded(order_id)) {
-        balanceDelta(+Number(activeOrder?.price || 0));
-        markRefunded(order_id);
-        toast.success(
-          `Pesanan dibatalkan. Refund: +${formatIDR(
-            Number(activeOrder?.price || 0)
-          )}`
-        );
+      const amt = safeNum(activeOrder?.price || 0);
+
+      if (otpEmpty && amt > 0 && !alreadyRefunded(order_id)) {
+        try {
+          await walletCredit({
+            amount: amt,
+            order_id,
+            note: "Refund manual cancel (OTP kosong)",
+          });
+          markRefunded(order_id);
+          toast.success(`Pesanan dibatalkan. Refund: +${formatIDR(amt)}`);
+        } catch (e) {
+          toast.error(String(e?.message || "Refund gagal"));
+        }
       } else {
         toast.success("Pesanan dibatalkan");
       }
 
-      // auto clear card
       clearActiveOrder("cancel_action", "canceled", { final_from_action: 1 });
       return;
     }
@@ -1079,7 +1141,7 @@ export default function OrderPage() {
     }
   }
 
-  /* ================= ORDER (harga web + saldo kepotong) ================= */
+  /* ================= ORDER (harga web + potong saldo backend) ================= */
   async function orderWithOperator(country, provider, operator) {
     const cid = String(country?.number_id || "");
     const pid = String(provider?.provider_id || "");
@@ -1096,7 +1158,6 @@ export default function OrderPage() {
 
     try {
       const r = await roOrder(cid, pid, oid);
-
       if (!r.ok || !r.json?.success) {
         toast.error(errMsg("Gagal buat order", r));
         return;
@@ -1108,12 +1169,16 @@ export default function OrderPage() {
         return;
       }
 
-      // FIX (3): harga selalu harga web (provider.price + markup)
+      // harga web: provider.price + markup
       const basePrice = safeNum(provider?.price);
       const sellPrice = applyMarkup(basePrice);
 
-      // FIX (4): saldo web kepotong saat transaksi sukses
-      balanceDelta(-sellPrice);
+      // POTONG SALDO BACKEND (wajib)
+      await walletDebit({
+        amount: sellPrice,
+        order_id: data.order_id,
+        note: `Order ${pickedService?.service_name || "service"}`,
+      });
 
       const row = {
         order_id: data.order_id,
@@ -1127,9 +1192,12 @@ export default function OrderPage() {
         status: "waiting",
         otp_code: "-",
         app_img: pickedServiceLogo || "",
+        // optional for UI (flag)
+        country_flag_url: flagUrlFromCountry(country) || "",
       };
 
       setActiveOrder(row);
+      saveActiveOrderLS(row);
 
       activityAdd({
         type: "order_create",
@@ -1147,8 +1215,8 @@ export default function OrderPage() {
       setOpenOperator(false);
       setOpenBuy(false);
       startPolling(row.order_id);
-    } catch {
-      toast.error("Server error (order)");
+    } catch (e) {
+      toast.error(String(e?.message || "Server error (order)"));
     } finally {
       setOpOrdering(false);
       setOrderingKey("");
@@ -1179,28 +1247,9 @@ export default function OrderPage() {
 
   /* ================= effects ================= */
 
-  // read saldo + subscribe saldo changes
-  useEffect(() => {
-    const sync = () => setBalanceIDR(getLocalBalance());
-    sync();
-
-    const onCustom = () => sync();
-    const onStorage = (e) => {
-      if (e?.key === LS_BALANCE_KEY) sync();
-    };
-
-    window.addEventListener("yinnotp:balance_changed", onCustom);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener("yinnotp:balance_changed", onCustom);
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
-
   useEffect(() => {
     let alive = true;
 
-    // restore active order dari localStorage
     const cached = loadActiveOrderLS();
     if (cached?.order_id) setActiveOrder(cached);
 
@@ -1213,7 +1262,7 @@ export default function OrderPage() {
 
     (async () => {
       setBootLoading(true);
-      await Promise.allSettled([refreshPing(), loadServices()]);
+      await Promise.allSettled([refreshPing(), loadServices(), loadBalance()]);
       if (!alive) return;
       updateNotifStateFromBrowser();
       setBootLoading(false);
@@ -1242,19 +1291,13 @@ export default function OrderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeOrder?.order_id]);
 
-  useEffect(() => {
-    saveActiveOrderLS(activeOrder);
-  }, [activeOrder]);
-
-  // FIX (2) + (5): auto expired -> auto clear + activity
+  // auto-expire -> clear & activity (mirip rumahotp)
   useEffect(() => {
     if (!activeOrder?.order_id) return;
-
     const expAt = orderExpiresAt(activeOrder);
     if (!expAt) return;
 
     if (Date.now() >= expAt) {
-      // expired -> clear
       activityAdd({
         type: "order_status",
         order_id: activeOrder.order_id,
@@ -1271,6 +1314,9 @@ export default function OrderPage() {
   const showCountryLoading = loadingCountries || modalKickLoading;
 
   /* ================= render ================= */
+
+  // saldo label ala screenshot: "2.150 IDR"
+  const saldoLabel = `${formatIDRCompact(balanceIDR)} IDR`;
 
   return (
     <div className="min-h-screen bg-[var(--yinn-bg)] text-[var(--yinn-text)]">
@@ -1368,7 +1414,9 @@ export default function OrderPage() {
       </header>
 
       <main className="mx-auto max-w-[520px] px-4 pt-4 pb-[calc(120px+env(safe-area-inset-bottom))]">
+        {/* TOP: card kiri + card kanan */}
         <section className="grid grid-cols-2 gap-3">
+          {/* kiri */}
           <div
             className="rounded-2xl border p-4"
             style={{
@@ -1425,15 +1473,60 @@ export default function OrderPage() {
               <ChevronRight size={18} />
             </button>
 
-            {/* FIX (6): tampil saldo web */}
-            <div className="mt-2 text-xs font-bold text-[var(--yinn-muted)]">
-              Saldo kamu:{" "}
-              <span className="font-extrabold text-[var(--yinn-text)]">
-                {formatIDR(balanceIDR)}
-              </span>
+            {/* SALDO KAMU ala screenshot */}
+            <div
+              className="mt-3 rounded-2xl border p-3"
+              style={{
+                borderColor: "var(--yinn-border)",
+                boxShadow: "var(--yinn-soft)",
+                background: "var(--yinn-surface)",
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className="grid h-12 w-12 place-items-center rounded-full text-white"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, rgba(255,122,0,0.95), rgba(155,81,224,0.95))",
+                  }}
+                >
+                  <Wallet size={18} />
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-bold text-[var(--yinn-muted)]">
+                    Saldo Kamu
+                  </div>
+                  <div className="truncate text-xl font-extrabold">
+                    {balanceLoading ? "..." : saldoLabel}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => toast("Buka halaman Top Up")}
+                  className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-extrabold"
+                  style={{
+                    background: "rgba(34,197,94,0.16)",
+                    border: "1px solid rgba(34,197,94,0.35)",
+                    color: "rgb(22,163,74)",
+                  }}
+                  title="Top Up"
+                >
+                  <ExternalLink size={18} />
+                  Top Up
+                </button>
+              </div>
+
+              <button
+                onClick={loadBalance}
+                className="mt-2 w-full rounded-xl border border-[var(--yinn-border)] py-2 text-xs font-extrabold text-[var(--yinn-muted)]"
+              >
+                Refresh Saldo
+              </button>
             </div>
           </div>
 
+          {/* kanan promo */}
           <div
             className="rounded-2xl border p-4 text-white"
             style={{
@@ -1475,7 +1568,7 @@ export default function OrderPage() {
           </div>
         </section>
 
-        {/* pending order */}
+        {/* ================= PESANAN PENDING (pixel-ish RumahOTP) ================= */}
         <section
           className="mt-4 rounded-2xl border p-4"
           style={{
@@ -1490,7 +1583,7 @@ export default function OrderPage() {
               onClick={() =>
                 activeOrder?.order_id && startPolling(activeOrder.order_id)
               }
-              className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--yinn-border)]"
+              className="grid h-10 w-14 place-items-center rounded-xl border border-[var(--yinn-border)]"
               aria-label="Sync order"
               title="Sync"
             >
@@ -1500,7 +1593,6 @@ export default function OrderPage() {
 
           {activeOrder ? (
             (() => {
-              // cooldown cancel (tetap)
               const cooldownMs = 3 * 60 * 1000;
               const createdAt = Number(activeOrder?.created_at || 0);
               const elapsed = nowTick - createdAt;
@@ -1508,110 +1600,120 @@ export default function OrderPage() {
               const canCancel = leftCancel <= 0;
 
               const phone = String(activeOrder.phone_number || "—");
-
-              // FIX (2): badge waktu = expired time
-              const expAt = orderExpiresAt(activeOrder);
-              const expTimeBadge = expAt ? hhmm(expAt) : "—";
-              const expLeft = expAt ? Math.max(0, expAt - nowTick) : 0;
-
-              // FIX (3): harga web (udah diset saat order)
-              const priceBadge = formatIDR(Number(activeOrder.price || 0));
-
               const operator = String(activeOrder.operator || "any");
               const appName = String(activeOrder.service || "—");
               const appImg = String(activeOrder.app_img || pickedServiceLogo || "");
               const statusTxt = statusLabel(activeOrder.status);
 
+              const expAt = orderExpiresAt(activeOrder);
+              const expTimeBadge = expAt ? hhmm(expAt) : "—";
+
+              // harga badge kayak screenshot: "Rp650" (tanpa ribuan format RumahOTP)
+              // tapi harga web lu harus 1.650, jadi tetap Rp1650 (kalau mau "Rp1.650" tinggal ubah)
+              const priceBadge = `Rp${formatIDRCompact(activeOrder.price || 0)}`;
+
+              const flagUrl =
+                String(activeOrder.country_flag_url || "").trim() ||
+                "";
+
               return (
-                <div className="mt-3 rounded-2xl border border-[var(--yinn-border)] bg-white/40 p-3 dark:bg-black/10">
-                  {/* top row */}
+                <div className="mt-3 rounded-2xl border border-[var(--yinn-border)] bg-white/40 p-4 dark:bg-black/10">
+                  {/* top row (flag + phone + copy) + (time + price badges) */}
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="truncate text-base font-extrabold">
-                          {phone}
+                      <div className="flex items-center gap-3">
+                        <div className="grid h-8 w-10 place-items-center">
+                          {flagUrl ? (
+                            <img
+                              src={flagUrl}
+                              alt="flag"
+                              className="h-6 w-8 rounded-sm object-cover"
+                            />
+                          ) : (
+                            <div className="h-6 w-8 rounded-sm bg-black/10 dark:bg-white/10" />
+                          )}
                         </div>
-                        <button
-                          onClick={() => {
-                            try {
-                              navigator.clipboard.writeText(phone);
-                              toast.success("Nomor disalin");
-                            } catch {
-                              toast.error("Gagal copy nomor");
-                            }
-                          }}
-                          className="inline-flex h-8 items-center justify-center rounded-lg border border-[var(--yinn-border)] px-3 text-xs font-extrabold"
-                          title="Copy nomor"
-                          aria-label="Copy nomor"
-                        >
-                          Copy
-                        </button>
+
+                        <div className="flex min-w-0 items-center gap-2">
+                          <div className="truncate text-base font-extrabold">
+                            {phone}
+                          </div>
+                          <button
+                            onClick={() => {
+                              try {
+                                navigator.clipboard.writeText(phone);
+                                toast.success("Nomor disalin");
+                              } catch {
+                                toast.error("Gagal copy nomor");
+                              }
+                            }}
+                            className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--yinn-border)] bg-white/60 dark:bg-black/10"
+                            title="Copy"
+                            aria-label="Copy nomor"
+                          >
+                            <Copy size={16} className="text-[var(--yinn-muted)]" />
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="mt-2 flex items-center gap-2 text-sm font-bold text-[var(--yinn-muted)]">
-                        <span className="inline-flex items-center gap-2">
-                          <span className="font-extrabold">{operator}</span>
+                      {/* operator row */}
+                      <div className="mt-3 flex items-center gap-2 text-sm font-bold text-[var(--yinn-muted)]">
+                        <Sparkles size={16} className="text-[var(--yinn-muted)]" />
+                        <span className="font-extrabold text-[var(--yinn-text)]">
+                          {operator}
                         </span>
                       </div>
                     </div>
 
                     <div className="flex flex-col items-end gap-2">
-                      <span className="inline-flex items-center rounded-full bg-amber-500/15 px-3 py-1 text-sm font-extrabold text-amber-700 dark:text-amber-300">
+                      <span className="inline-flex items-center gap-2 rounded-full bg-amber-500/20 px-3 py-1 text-sm font-extrabold text-amber-700 dark:text-amber-300">
+                        <Clock size={16} />
                         {expTimeBadge}
                       </span>
-                      <span className="inline-flex items-center rounded-full bg-blue-500/15 px-3 py-1 text-sm font-extrabold text-blue-700 dark:text-blue-300">
+
+                      <span className="inline-flex items-center rounded-full bg-blue-500/20 px-3 py-1 text-sm font-extrabold text-blue-700 dark:text-blue-300">
                         {priceBadge}
                       </span>
                     </div>
                   </div>
 
                   {/* app card */}
-                  <div className="mt-3 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-3">
+                  <div className="mt-4 rounded-2xl border border-[var(--yinn-border)] bg-[var(--yinn-surface)] p-4">
                     <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-2xl border border-[var(--yinn-border)] bg-black/5 dark:bg-white/5">
                           {appImg ? (
                             <img
                               src={appImg}
                               alt={appName}
-                              className="h-7 w-7"
+                              className="h-9 w-9"
                               loading="lazy"
                             />
                           ) : (
                             <div className="text-xs font-extrabold">APP</div>
                           )}
                         </div>
+
                         <div className="min-w-0">
                           <div className="truncate text-base font-extrabold">
                             {appName}
                           </div>
-                          <div className="truncate text-xs text-[var(--yinn-muted)]">
-                            Status: <span className="font-extrabold">{statusTxt}</span>
-                          </div>
                         </div>
                       </div>
 
-                      <div className="text-xs font-extrabold text-[var(--yinn-muted)]">
-                        {expAt ? (
-                          <span>
-                            Expired dalam{" "}
-                            <span className="font-extrabold text-[var(--yinn-text)]">
-                              {mmssLeft(expLeft)}
-                            </span>
-                          </span>
-                        ) : (
-                          <span>—</span>
-                        )}
+                      <div className="inline-flex items-center gap-2 text-sm font-extrabold text-amber-600">
+                        {statusTxt}
+                        <Mail size={18} />
                       </div>
                     </div>
 
                     <div className="mt-2 text-sm text-[var(--yinn-muted)]">
                       {canCancel ? (
-                        <span>Sudah bisa dibatalkan.</span>
+                        <span>Sudah bisa klik batal.</span>
                       ) : (
                         <span>
                           Tunggu{" "}
-                          <span className="font-extrabold text-red-500">
+                          <span className="font-extrabold text-amber-600">
                             {mmssLeft(leftCancel)}
                           </span>{" "}
                           sebelum klik batal.
@@ -1620,23 +1722,35 @@ export default function OrderPage() {
                     </div>
                   </div>
 
-                  {/* buttons (no emoji) */}
-                  <div className="mt-3 grid grid-cols-2 gap-3">
+                  {/* buttons */}
+                  <div className="mt-4 grid grid-cols-2 gap-3">
                     <button
                       onClick={openBuyModal}
-                      className="rounded-2xl border border-[var(--yinn-border)] py-3 text-sm font-extrabold"
-                      style={{ boxShadow: "var(--yinn-soft)" }}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border py-3 text-sm font-extrabold"
+                      style={{
+                        borderColor: "rgba(59,130,246,0.55)",
+                        color: "rgb(37,99,235)",
+                        background: "rgba(59,130,246,0.06)",
+                        boxShadow: "var(--yinn-soft)",
+                      }}
                     >
+                      <ShoppingBag size={18} />
                       Beli lagi
                     </button>
 
                     <button
                       onClick={() => setStatus("cancel")}
                       disabled={!canCancel}
-                      className="rounded-2xl border border-red-400/40 py-3 text-sm font-extrabold text-red-500 disabled:opacity-50"
-                      style={{ boxShadow: "var(--yinn-soft)" }}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border py-3 text-sm font-extrabold disabled:opacity-50"
+                      style={{
+                        borderColor: "rgba(239,68,68,0.45)",
+                        color: "rgb(239,68,68)",
+                        background: "rgba(239,68,68,0.06)",
+                        boxShadow: "var(--yinn-soft)",
+                      }}
                     >
-                      Batalkan
+                      <XCircle size={18} />
+                      Batal
                     </button>
                   </div>
                 </div>
@@ -2032,9 +2146,7 @@ export default function OrderPage() {
                                     loading="lazy"
                                   />
                                 ) : (
-                                  <div className="text-sm font-extrabold">
-                                    🏳️
-                                  </div>
+                                  <div className="h-6 w-6 rounded-md bg-black/10 dark:bg-white/10" />
                                 )}
                               </div>
 
@@ -2055,7 +2167,8 @@ export default function OrderPage() {
                                     Stok {stock || 0}
                                   </span>
                                   <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                                    Mulai {minp ? formatIDR(applyMarkup(minp)) : "—"}
+                                    Mulai{" "}
+                                    {minp ? formatIDR(applyMarkup(minp)) : "—"}
                                   </span>
                                 </div>
                               </div>

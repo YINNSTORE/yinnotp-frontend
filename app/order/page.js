@@ -169,15 +169,68 @@ function isOtpEmpty(otp) {
   return !v || v === "-" || v === "—";
 }
 
-/* error message extractor (biar jelas) */
+/* ================= FIX ERROR EXTRACTOR (BIAR GAK [object Object]) ================= */
 function errMsg(defaultMsg, r) {
-  const m =
-    r?.json?.message ||
-    r?.json?.error ||
-    r?.json?.msg ||
-    r?.json?.data?.message ||
+  if (!r) return defaultMsg;
+
+  const j = r?.json;
+  if (!j) return defaultMsg;
+
+  // kalau backend kirim string langsung
+  if (typeof j === "string") return j;
+
+  // ambil message umum
+  const msg =
+    (typeof j.message === "string" && j.message) ||
+    (typeof j.msg === "string" && j.msg) ||
+    (typeof j.error === "string" && j.error) ||
+    (typeof j?.data?.message === "string" && j.data.message) ||
     "";
-  return String(m || "").trim() ? `${defaultMsg}: ${m}` : defaultMsg;
+
+  // deteksi tipe error (provider/user balance) kalau backend lu ngirim "type"/"code"
+  const type = String(j.type || j.code || "").toLowerCase();
+
+  // ===== provider balance (RumahOTP) =====
+  if (
+    type.includes("provider") ||
+    type.includes("supplier") ||
+    type.includes("rumahotp") ||
+    (msg && /provider|supplier|rumahotp/i.test(msg))
+  ) {
+    return "Saldo provider (RumahOTP) tidak cukup";
+  }
+
+  // ===== user/web balance =====
+  if (
+    type.includes("balance") ||
+    type.includes("user_balance") ||
+    (msg && /saldo|balance/i.test(msg) && /tidak cukup|insufficient/i.test(msg))
+  ) {
+    // kalau backend ngasih angka
+    const need = Number(j.need ?? j.required ?? j.amount ?? j.total ?? 0);
+    const bal = Number(j.balance ?? j.saldo ?? 0);
+
+    if (need || bal) {
+      return `Saldo tidak cukup. Butuh ${formatIDR(
+        need
+      )}, saldo ${formatIDR(bal)}`;
+    }
+    return "Saldo tidak cukup";
+  }
+
+  // kalau error object
+  if (typeof j.error === "object" && j.error) {
+    const em = j.error.message || j.error.msg;
+    if (typeof em === "string" && em.trim()) return em;
+    try {
+      return JSON.stringify(j.error);
+    } catch {
+      return defaultMsg;
+    }
+  }
+
+  // fallback message
+  return msg && String(msg).trim() ? msg : defaultMsg;
 }
 
 /* saldo local helpers (frontend). Kalau lu punya backend saldo, ganti isi balanceDelta() ke API lu */
@@ -986,6 +1039,11 @@ export default function OrderPage() {
     }
   }
 
+  /* ================= FIX: ORDER JANGAN CEK SALDO LOCAL =================
+     - saldo insufficient harus dari backend
+     - error provider saldo kurang harus jelas
+     - tidak ada lagi [object Object]
+  */
   async function orderWithOperator(country, provider, operator) {
     const cid = String(country?.number_id || "");
     const pid = String(provider?.provider_id || "");
@@ -1002,6 +1060,7 @@ export default function OrderPage() {
 
     try {
       const r = await roOrder(cid, pid, oid);
+
       if (!r.ok || !r.json?.success) {
         toast.error(errMsg("Gagal buat order", r));
         return;
@@ -1013,25 +1072,10 @@ export default function OrderPage() {
         return;
       }
 
-      const basePrice = safeNum(data.price || provider?.price);
-      const sellPrice = applyMarkup(basePrice);
-
-      // potong saldo setelah order beneran dibuat
-      const curBal = getLocalBalance();
-      if (curBal < sellPrice) {
-        // best effort cancel biar gak nyangkut
-        try {
-          await roStatusSet(String(data.order_id), "cancel");
-        } catch {}
-        toast.error(
-          `Saldo tidak cukup. Butuh ${formatIDR(
-            sellPrice
-          )}, saldo ${formatIDR(curBal)}`
-        );
-        return;
-      }
-
-      balanceDelta(-sellPrice);
+      // harga final dari backend (kalau backend tidak kirim, fallback dari provider price + markup)
+      const backendPrice = safeNum(data.price ?? data.total_price ?? data.amount);
+      const fallbackSell = applyMarkup(safeNum(provider?.price));
+      const sellPrice = backendPrice > 0 ? backendPrice : fallbackSell;
 
       const row = {
         order_id: data.order_id,
@@ -1060,7 +1104,7 @@ export default function OrderPage() {
         ts: Date.now(),
       });
 
-      toast.success(`Order dibuat. Saldo -${formatIDR(sellPrice)}`);
+      toast.success("Order berhasil dibuat");
       setOpenOperator(false);
       setOpenBuy(false);
       startPolling(row.order_id);
@@ -1383,7 +1427,9 @@ export default function OrderPage() {
               ).toLocaleString("id-ID")}`;
               const operator = String(activeOrder.operator || "any");
               const appName = String(activeOrder.service || "—");
-              const appImg = String(activeOrder.app_img || pickedServiceLogo || "");
+              const appImg = String(
+                activeOrder.app_img || pickedServiceLogo || ""
+              );
               const statusTxt = statusLabel(activeOrder.status);
 
               return (
@@ -1599,7 +1645,8 @@ export default function OrderPage() {
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">
                 <div className="text-xs font-extrabold">OTP gak masuk</div>
                 <div className="mt-1 text-[11px] text-[var(--yinn-muted)]">
-                  Coba Resend. Kalau tetap kosong, Cancel lalu pilih provider lain.
+                  Coba Resend. Kalau tetap kosong, Cancel lalu pilih provider
+                  lain.
                 </div>
               </div>
               <div className="rounded-2xl border border-[var(--yinn-border)] p-3">

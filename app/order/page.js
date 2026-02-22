@@ -621,6 +621,16 @@ export default function OrderPage() {
   const [polling, setPolling] = useState(false);
   const pollRef = useRef(null);
 
+  /* ================= FIXED REFS (anti stale & anti double) ================= */
+  const activeOrderRef = useRef(null);
+  useEffect(() => {
+    activeOrderRef.current = activeOrder;
+  }, [activeOrder]);
+
+  const pollingOrderIdRef = useRef("");
+  const inRefundRef = useRef({});
+  const inCancelRef = useRef({});
+
   /* loading anim sebentar pas modal */
   const [modalKickLoading, setModalKickLoading] = useState(false);
   const modalKickRef = useRef(null);
@@ -882,6 +892,7 @@ export default function OrderPage() {
 
   function stopPolling() {
     setPolling(false);
+    pollingOrderIdRef.current = "";
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
@@ -890,20 +901,21 @@ export default function OrderPage() {
 
   function clearActiveOrder(reason, finalStatus, extra = {}) {
     try {
-      if (activeOrder?.order_id) {
+      const cur = activeOrderRef.current;
+      if (cur?.order_id) {
         activityAdd({
           type: "order_final",
           reason: reason || "final",
-          order_id: activeOrder.order_id,
-          phone_number: activeOrder.phone_number,
-          service: activeOrder.service,
-          country: activeOrder.country,
-          operator: activeOrder.operator,
-          price: activeOrder.price,
-          status: finalStatus || activeOrder.status || "final",
-          otp_code: activeOrder.otp_code,
-          created_at: activeOrder.created_at,
-          expires_in_minute: activeOrder.expires_in_minute,
+          order_id: cur.order_id,
+          phone_number: cur.phone_number,
+          service: cur.service,
+          country: cur.country,
+          operator: cur.operator,
+          price: cur.price,
+          status: finalStatus || cur.status || "final",
+          otp_code: cur.otp_code,
+          created_at: cur.created_at,
+          expires_in_minute: cur.expires_in_minute,
           ...extra,
           ts: Date.now(),
         });
@@ -913,6 +925,29 @@ export default function OrderPage() {
     stopPolling();
     setActiveOrder(null);
     saveActiveOrderLS(null);
+    activeOrderRef.current = null;
+  }
+
+  async function safeRefundOnce(order_id, amount, note) {
+    const oid = String(order_id || "");
+    if (!oid) return;
+
+    if (alreadyRefunded(oid)) return;
+    if (inRefundRef.current[oid]) return;
+
+    inRefundRef.current[oid] = true;
+    try {
+      const amt = safeNum(amount);
+      if (amt > 0) {
+        await walletCredit({ amount: amt, order_id: oid, note });
+      }
+      markRefunded(oid);
+      toast.success(`Refund berhasil: +${formatIDR(amt)}`);
+    } catch (e) {
+      toast.error(String(e?.message || "Refund gagal"));
+    } finally {
+      inRefundRef.current[oid] = false;
+    }
   }
 
   /* ================= Provider API ================= */
@@ -976,46 +1011,84 @@ export default function OrderPage() {
     }
   }
 
-  async function pollOnce(order_id) {
+async function pollOnce(order_id) {
     const r = await roStatusGet(order_id);
     if (!r.ok || !r.json?.success) return null;
     return r.json?.data || null;
   }
 
   async function startPolling(order_id) {
+    const oid = String(order_id || "");
+    if (!oid) return;
+
+    // anti double interval utk order yang sama
+    if (pollingOrderIdRef.current === oid && pollRef.current) return;
+
     stopPolling();
     setPolling(true);
+    pollingOrderIdRef.current = oid;
 
-    const first = await pollOnce(order_id);
-    if (first) {
-      setActiveOrder((o) => {
-        if (!o) return o;
-        const next = { ...o, status: first.status, otp_code: first.otp_code };
-        if (String(first.otp_code || "").trim())
-          fireOtpNotification(first.otp_code, next.phone_number);
-        return next;
-      });
+    // first fetch
+    try {
+      const first = await pollOnce(oid);
+      if (first) {
+        setActiveOrder((o) => {
+          if (!o) return o;
+          if (String(o.order_id) !== oid) return o;
+          const next = { ...o, status: first.status, otp_code: first.otp_code };
+          if (String(first.otp_code || "").trim())
+            fireOtpNotification(first.otp_code, next.phone_number);
+          return next;
+        });
 
-      activityAdd({
-        type: "order_status",
-        order_id,
-        status: first.status,
-        otp_code: first.otp_code,
-        ts: Date.now(),
-      });
+        activityAdd({
+          type: "order_status",
+          order_id: oid,
+          status: first.status,
+          otp_code: first.otp_code,
+          ts: Date.now(),
+        });
 
-      if (isFinalStatus(first.status)) {
-        clearActiveOrder("final_status", first.status, { final_from_poll: 1 });
-        return;
+        const stFirst = String(first.status || "").toLowerCase();
+        if (
+          (stFirst.includes("cancel") || stFirst.includes("canceled")) &&
+          isOtpEmpty(first.otp_code)
+        ) {
+          const latest = activeOrderRef.current;
+          const latestPrice = safeNum(latest?.price || 0);
+          if (latestPrice > 0) {
+            await safeRefundOnce(oid, latestPrice, "Refund cancel (OTP kosong)");
+          }
+        }
+
+        if (isFinalStatus(first.status)) {
+          clearActiveOrder("final_status", first.status, { final_from_poll: 1 });
+          return;
+        }
       }
+    } catch {
+      // ignore
     }
 
     pollRef.current = setInterval(async () => {
-      const data = await pollOnce(order_id);
+      const cur = activeOrderRef.current;
+      if (!cur?.order_id || String(cur.order_id) !== oid) {
+        stopPolling();
+        return;
+      }
+
+      let data = null;
+      try {
+        data = await pollOnce(oid);
+      } catch {
+        data = null;
+      }
       if (!data) return;
 
       setActiveOrder((o) => {
         if (!o) return o;
+        if (String(o.order_id) !== oid) return o;
+
         const next = { ...o, status: data.status, otp_code: data.otp_code };
         if (String(data?.otp_code || "").trim())
           fireOtpNotification(data.otp_code, next.phone_number);
@@ -1024,32 +1097,21 @@ export default function OrderPage() {
 
       activityAdd({
         type: "order_status",
-        order_id,
+        order_id: oid,
         status: data.status,
         otp_code: data.otp_code,
         ts: Date.now(),
       });
 
-      // refund otomatis kalau cancel & otp kosong (sekali)
       const st = String(data.status || "").toLowerCase();
       if (
         (st.includes("cancel") || st.includes("canceled")) &&
-        isOtpEmpty(data.otp_code) &&
-        !alreadyRefunded(order_id)
+        isOtpEmpty(data.otp_code)
       ) {
-        try {
-          const amt = safeNum(activeOrder?.price || 0);
-          if (amt > 0) {
-            await walletCredit({
-              amount: amt,
-              order_id,
-              note: "Refund cancel (OTP kosong)",
-            });
-          }
-          markRefunded(order_id);
-          toast.success(`Refund berhasil: +${formatIDR(amt)}`);
-        } catch (e) {
-          toast.error(String(e?.message || "Refund gagal"));
+        const latest = activeOrderRef.current;
+        const latestPrice = safeNum(latest?.price || 0);
+        if (latestPrice > 0) {
+          await safeRefundOnce(oid, latestPrice, "Refund cancel (OTP kosong)");
         }
       }
 
@@ -1060,42 +1122,48 @@ export default function OrderPage() {
   }
 
   async function setStatus(action) {
-    if (!activeOrder?.order_id) return;
-    const order_id = activeOrder.order_id;
-
-    const r = await roStatusSet(order_id, action);
-    if (!r.ok || !r.json?.success) {
-      toast.error(errMsg("Gagal update status", r));
-      return;
-    }
+    const cur = activeOrderRef.current;
+    if (!cur?.order_id) return;
+    const order_id = String(cur.order_id || "");
+    if (!order_id) return;
 
     if (action === "cancel") {
-      // refund kalau OTP belum ada (sekali)
-      const otpEmpty = isOtpEmpty(activeOrder?.otp_code);
-      const amt = safeNum(activeOrder?.price || 0);
-
-      if (otpEmpty && amt > 0 && !alreadyRefunded(order_id)) {
-        try {
-          await walletCredit({
-            amount: amt,
-            order_id,
-            note: "Refund manual cancel (OTP kosong)",
-          });
-          markRefunded(order_id);
-          toast.success(`Pesanan dibatalkan. Refund: +${formatIDR(amt)}`);
-        } catch (e) {
-          toast.error(String(e?.message || "Refund gagal"));
-        }
-      } else {
-        toast.success("Pesanan dibatalkan");
-      }
-
-      clearActiveOrder("cancel_action", "canceled", { final_from_action: 1 });
-      return;
+      if (inCancelRef.current[order_id]) return;
+      inCancelRef.current[order_id] = true;
     }
 
-    toast.success("OK");
-    startPolling(order_id);
+    try {
+      const r = await roStatusSet(order_id, action);
+      if (!r.ok || !r.json?.success) {
+        toast.error(errMsg("Gagal update status", r));
+        return;
+      }
+
+      if (action === "cancel") {
+        const latest = activeOrderRef.current;
+        const otpEmpty = isOtpEmpty(latest?.otp_code);
+        const amt = safeNum(latest?.price || 0);
+
+        if (otpEmpty && amt > 0) {
+          await safeRefundOnce(
+            order_id,
+            amt,
+            "Refund manual cancel (OTP kosong)"
+          );
+          toast.success(`Pesanan dibatalkan. Refund: +${formatIDR(amt)}`);
+        } else {
+          toast.success("Pesanan dibatalkan");
+        }
+
+        clearActiveOrder("cancel_action", "canceled", { final_from_action: 1 });
+        return;
+      }
+
+      toast.success("OK");
+      startPolling(order_id);
+    } finally {
+      if (action === "cancel") inCancelRef.current[order_id] = false;
+    }
   }
 
   /* ================= operator picker flow ================= */
@@ -1141,8 +1209,9 @@ export default function OrderPage() {
     }
   }
 
-  /* ================= ORDER (harga web + potong saldo backend) ================= */
   async function orderWithOperator(country, provider, operator) {
+    if (opOrdering) return; // HARD GUARD
+
     const cid = String(country?.number_id || "");
     const pid = String(provider?.provider_id || "");
     const oid = String(operator?.id || "");
@@ -1156,60 +1225,58 @@ export default function OrderPage() {
     setOrderingKey(key);
     setOpOrdering(true);
 
+    let createdOrderId = "";
     try {
       const r = await roOrder(cid, pid, oid);
+
       if (!r.ok || !r.json?.success) {
         toast.error(errMsg("Gagal buat order", r));
         return;
       }
 
-      const data = r.json?.data || null;
+      const data = r.json?.data;
       if (!data?.order_id) {
         toast.error("Order gagal: order_id kosong");
         return;
       }
 
-      // harga web: provider.price + markup
+      createdOrderId = String(data.order_id);
+
       const basePrice = safeNum(provider?.price);
       const sellPrice = applyMarkup(basePrice);
 
-      // POTONG SALDO BACKEND (wajib)
-      await walletDebit({
-        amount: sellPrice,
-        order_id: data.order_id,
-        note: `Order ${pickedService?.service_name || "service"}`,
-      });
+      // debit setelah order berhasil
+      // kalau debit gagal -> cancel provider (biar gak nyangkut)
+      try {
+        await walletDebit({
+          amount: sellPrice,
+          order_id: createdOrderId,
+          note: `Order ${pickedService?.service_name || "service"}`,
+        });
+      } catch (e) {
+        try {
+          await roStatusSet(createdOrderId, "cancel");
+        } catch {}
+        throw e;
+      }
 
       const row = {
-        order_id: data.order_id,
+        order_id: createdOrderId,
         phone_number: data.phone_number || "",
-        service: data.service || pickedService?.service_name || "",
-        country: data.country || country?.name || "",
-        operator: data.operator || operator?.name || "any",
+        service: pickedService?.service_name || "",
+        country: country?.name || "",
+        operator: operator?.name || "any",
         expires_in_minute: data.expires_in_minute || 0,
         price: sellPrice,
         created_at: Date.now(),
         status: "waiting",
         otp_code: "-",
         app_img: pickedServiceLogo || "",
-        // optional for UI (flag)
         country_flag_url: flagUrlFromCountry(country) || "",
       };
 
       setActiveOrder(row);
       saveActiveOrderLS(row);
-
-      activityAdd({
-        type: "order_create",
-        order_id: row.order_id,
-        phone_number: row.phone_number,
-        service: row.service,
-        country: row.country,
-        operator: row.operator,
-        price: row.price,
-        expires_in_minute: row.expires_in_minute,
-        ts: Date.now(),
-      });
 
       toast.success("Order berhasil dibuat");
       setOpenOperator(false);
@@ -1416,7 +1483,8 @@ export default function OrderPage() {
       <main className="mx-auto max-w-[520px] px-4 pt-4 pb-[calc(120px+env(safe-area-inset-bottom))]">
         {/* TOP: card kiri + card kanan */}
         <section className="grid grid-cols-2 gap-3">
-          {/* kiri */}
+
+{/* kiri */}
           <div
             className="rounded-2xl border p-4"
             style={{
@@ -1608,8 +1676,6 @@ export default function OrderPage() {
               const expAt = orderExpiresAt(activeOrder);
               const expTimeBadge = expAt ? hhmm(expAt) : "—";
 
-              // harga badge kayak screenshot: "Rp650" (tanpa ribuan format RumahOTP)
-              // tapi harga web lu harus 1.650, jadi tetap Rp1650 (kalau mau "Rp1.650" tinggal ubah)
               const priceBadge = `Rp${formatIDRCompact(activeOrder.price || 0)}`;
 
               const flagUrl =

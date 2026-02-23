@@ -700,14 +700,16 @@ export default function OrderPage() {
     }
     /* ================= Backend wallet API ================= */
     async function apiJson(url, init) {
-        const res = await fetch(url, {
-            ...init,
-            headers: {
-                "Content-Type": "application/json",
-                ...(init?.headers || {}),
-            },
-            cache: "no-store",
-        });
+    const auth = getAuthHeader();
+    const res = await fetch(url, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(auth ? { Authorization: auth } : {}),
+        ...(init?.headers || {}),
+      },
+      cache: "no-store",
+    });
         let json = null;
         try {
             json = await res.json();

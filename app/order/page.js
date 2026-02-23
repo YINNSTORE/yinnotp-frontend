@@ -40,6 +40,18 @@ function safeNum(v) {
     const n = Number(v);
     return Number.isFinite(n) ? n : 0;
 }
+
+// parse saldo dari string macam "Rp 42.000" / "42.000" / "42000"
+function moneyNum(v) {
+    if (typeof v === "number")
+        return Number.isFinite(v) ? v : 0;
+    if (typeof v === "string") {
+        const digits = v.replace(/[^0-9]/g, "");
+        if (digits)
+            return Number(digits) || 0;
+    }
+    return safeNum(v);
+}
 const formatIDR = (n) => new Intl.NumberFormat("id-ID", {
     style: "currency",
     currency: "IDR",
@@ -721,20 +733,47 @@ export default function OrderPage() {
         }
         catch { }
     }
+    function hasBalanceFieldInJson(j) {
+        if (!j || typeof j !== "object")
+            return false;
+        const has = (o, k) => !!(o && typeof o === "object" && Object.prototype.hasOwnProperty.call(o, k));
+        return (has(j, "balance") ||
+            has(j, "saldo") ||
+            has(j, "user_balance") ||
+            has(j, "wallet_balance") ||
+            has(j.data, "balance") ||
+            has(j.data, "saldo") ||
+            has(j.data, "user_balance") ||
+            has(j.data, "wallet_balance") ||
+            has(j.result, "balance") ||
+            has(j.result, "saldo") ||
+            has(j.wallet, "balance") ||
+            has(j.wallet, "saldo"));
+    }
     function extractBalanceFromJson(j) {
         if (!j)
-            return 0;
-        // dukung banyak bentuk response
+            return null;
+        if (typeof j === "string") {
+            const n = moneyNum(j);
+            return Number.isFinite(n) ? n : null;
+        }
+        if (!hasBalanceFieldInJson(j))
+            return null;
         const direct = j.balance ??
             j.saldo ??
+            j.user_balance ??
+            j.wallet_balance ??
             j.data?.balance ??
             j.data?.saldo ??
+            j.data?.user_balance ??
+            j.data?.wallet_balance ??
             j.result?.balance ??
             j.result?.saldo ??
             j.wallet?.balance ??
             j.wallet?.saldo ??
             0;
-        return safeNum(direct);
+        const n = moneyNum(direct);
+        return Number.isFinite(n) ? n : null;
     }
     function isWalletSuccess(r) {
         if (!r || !r.ok)
@@ -748,34 +787,21 @@ export default function OrderPage() {
         if (typeof flag === "number")
             return flag === 1;
         if (typeof flag === "string") {
-            const s = flag.trim().toLowerCase();
-            if (s === "1" || s === "true" || s === "ok" || s === "success" || s === "yes")
+            const s = flag.toLowerCase();
+            if (s === "ok" || s === "success" || s === "true" || s === "1")
                 return true;
-            if (s === "0" || s === "false" || s === "fail" || s === "failed" || s === "error" || s === "no")
+            if (s === "fail" || s === "failed" || s === "error" || s === "false" || s === "0")
                 return false;
         }
-        if (j?.error && (j.error.code || j.error.message || j.error.msg))
+        // kalau ada field error yang jelas, anggap gagal
+        if (typeof j.error === "string" && j.error.trim())
             return false;
-        const hasBalanceField = (() => {
-            try {
-                const has = (obj, k) => !!obj && typeof obj === "object" && Object.prototype.hasOwnProperty.call(obj, k);
-                if (has(j, "balance") || has(j, "saldo"))
-                    return true;
-                const d = j.data;
-                if (has(d, "balance") || has(d, "saldo"))
-                    return true;
-                const dd = d?.data;
-                if (has(dd, "balance") || has(dd, "saldo"))
-                    return true;
-                const res = j.result;
-                if (has(res, "balance") || has(res, "saldo"))
-                    return true;
-            }
-            catch { }
+        if (j.error && typeof j.error === "object")
             return false;
-        })();
-        const b = extractBalanceFromJson(j);
-        return hasBalanceField && Number.isFinite(Number(b));
+        if (Array.isArray(j.errors) && j.errors.length)
+            return false;
+        // kalau response gak jelas tapi HTTP ok, anggap sukses (biar gak false-negative)
+        return true;
     }
     async function loadBalance(opts) {
         const silent = !!opts?.silent;
@@ -796,8 +822,19 @@ export default function OrderPage() {
                 return;
             }
             const b = extractBalanceFromJson(r.json);
+            if (b == null) {
+                setBalanceErrText("Format saldo tidak dikenali");
+                const cached = readBalanceCache();
+                if (cached > 0)
+                    setBalanceIDR(cached);
+                if (!silent)
+                    toast.error("Gagal load saldo");
+                return;
+            }
             setBalanceIDR(b);
             writeBalanceCache(b);
+            setBalanceErrText("");
+
         }
         catch {
             const msg = "Server error (saldo)";
@@ -812,7 +849,7 @@ export default function OrderPage() {
             setBalanceLoading(false);
         }
     }
-    async function walletDebit({ amount, order_id, note, }) {
+    async function walletDebit({ amount, order_id, note }) {
         const r = await apiJson(API_WALLET.debit, {
             method: "POST",
             body: JSON.stringify({ amount, order_id, note }),
@@ -821,11 +858,20 @@ export default function OrderPage() {
             throw new Error(errMsg("Gagal potong saldo", r));
         }
         const b = extractBalanceFromJson(r.json);
+        if (b == null) {
+            // backend mungkin gak ngasih "balance" terbaru -> potong lokal biar UI langsung update
+            const prev = readBalanceCache() ?? balanceIDR ?? 0;
+            const next = Math.max(0, Math.floor(moneyNum(prev) - moneyNum(amount)));
+            setBalanceIDR(next);
+            writeBalanceCache(next);
+            return next;
+        }
         setBalanceIDR(b);
         writeBalanceCache(b);
         return b;
     }
-    async function walletCredit({ amount, order_id, note, }) {
+
+async function walletCredit({ amount, order_id, note }) {
         const r = await apiJson(API_WALLET.credit, {
             method: "POST",
             body: JSON.stringify({ amount, order_id, note }),
@@ -834,11 +880,20 @@ export default function OrderPage() {
             throw new Error(errMsg("Gagal refund saldo", r));
         }
         const b = extractBalanceFromJson(r.json);
+        if (b == null) {
+            // backend mungkin gak ngasih "balance" terbaru -> tambah lokal biar UI langsung update
+            const prev = readBalanceCache() ?? balanceIDR ?? 0;
+            const next = Math.max(0, Math.floor(moneyNum(prev) + moneyNum(amount)));
+            setBalanceIDR(next);
+            writeBalanceCache(next);
+            return next;
+        }
         setBalanceIDR(b);
         writeBalanceCache(b);
         return b;
     }
-    /* ================= order helpers ================= */
+
+/* ================= order helpers ================= */
     function orderExpiresAt(order) {
         if (!order)
             return 0;
@@ -1200,6 +1255,13 @@ export default function OrderPage() {
         const cached = loadActiveOrderLS();
         if (cached?.order_id)
             setActiveOrder(cached);
+
+        // tampilkan saldo cache dulu biar gak kosong/blank
+        try {
+            const cb = readBalanceCache();
+            if (cb != null && cb > 0)
+                setBalanceIDR(cb);
+        } catch {}
         // tampilkan cache saldo dulu biar gak kosong
         const cachedBal = readBalanceCache();
         if (cachedBal > 0)

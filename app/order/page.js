@@ -26,6 +26,63 @@ const API_WALLET = {
     debit: "/api/wallet/debit", // POST -> { success, balance }
     credit: "/api/wallet/credit", // POST -> { success, balance }
 };
+
+/* ================= auth header helper (ambil token login) ================= */
+/**
+ * Backend serv00 lu nge-guard pakai Authorization: Bearer <token>.
+ * Kita coba ambil token dari beberapa key localStorage yang umum dipakai.
+ * (Kalau lu punya key spesifik lain, tinggal tambahin di array 'keys'.)
+ */
+function getAuthToken() {
+  if (typeof window === "undefined") return "";
+  const keys = [
+    "yinnotp:token:v1",
+    "yinnotp:token",
+    "yinnotp:auth_token",
+    "auth_token",
+    "access_token",
+    "token",
+    "yinn_token",
+  ];
+
+  for (const k of keys) {
+    try {
+      const raw =
+        (typeof localStorage !== "undefined" && localStorage.getItem(k)) ||
+        (typeof sessionStorage !== "undefined" && sessionStorage.getItem(k)) ||
+        "";
+      if (!raw) continue;
+
+      const s = String(raw).trim();
+      if (!s) continue;
+
+      // kalau bentuk JSON (misal {"token":"..."})
+      if (s.startsWith("{") && s.endsWith("}")) {
+        try {
+          const obj = JSON.parse(s);
+          const t =
+            obj?.token ||
+            obj?.accessToken ||
+            obj?.access_token ||
+            obj?.data?.token ||
+            obj?.data?.access_token;
+          if (t) return String(t).replace(/^Bearer\s+/i, "").trim();
+        } catch {}
+      }
+
+      // kalau langsung token / "Bearer xxx"
+      const v = s.replace(/^Bearer\s+/i, "").trim();
+      if (v) return v;
+    } catch {}
+  }
+  return "";
+}
+
+function authHeaders() {
+  const t = getAuthToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
 function cx(...xs) {
     return xs.filter(Boolean).join(" ");
 }
@@ -64,7 +121,7 @@ function formatIDRCompact(n) {
 function msLabel(ms) {
     const n = Number(ms);
     if (!Number.isFinite(n) || n <= 0)
-        return "—";
+        return "â€”";
     return `${Math.round(n)}ms`;
 }
 function msRange(ms) {
@@ -102,7 +159,7 @@ function statusLabel(v) {
         return "Expired";
     if (s.includes("waiting") || s.includes("pending"))
         return "Menunggu";
-    return s || "—";
+    return s || "â€”";
 }
 function isFinalStatus(v) {
     const s = String(v || "").toLowerCase();
@@ -130,10 +187,10 @@ function fmtRatePercent(rate) {
 /* time helpers */
 function hhmm(ts) {
     if (!ts)
-        return "—";
+        return "â€”";
     const d = new Date(ts);
     if (Number.isNaN(d.getTime()))
-        return "—";
+        return "â€”";
     return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
 function mmssLeft(msLeft) {
@@ -144,7 +201,7 @@ function mmssLeft(msLeft) {
 }
 function isOtpEmpty(otp) {
     const v = String(otp || "").trim();
-    return !v || v === "-" || v === "—";
+    return !v || v === "-" || v === "â€”";
 }
 /* ================= ERROR EXTRACTOR ================= */
 function errMsg(defaultMsg, r) {
@@ -684,14 +741,14 @@ export default function OrderPage() {
     function fireOtpNotification(otp, phone) {
         if (!notifEnabled)
             return;
-        if (!otp || otp === "-" || otp === "—")
+        if (!otp || otp === "-" || otp === "â€”")
             return;
         const key = `${phone || ""}:${otp}`;
         if (lastNotifiedOtpRef.current === key)
             return;
         lastNotifiedOtpRef.current = key;
         try {
-            new Notification("YinnOTP • OTP Masuk", {
+            new Notification("YinnOTP â€¢ OTP Masuk", {
                 body: phone ? `Nomor: ${phone}\nOTP: ${otp}` : `OTP: ${otp}`,
                 silent: false,
             });
@@ -700,16 +757,15 @@ export default function OrderPage() {
     }
     /* ================= Backend wallet API ================= */
     async function apiJson(url, init) {
-    const auth = getAuthHeader();
-    const res = await fetch(url, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(auth ? { Authorization: auth } : {}),
-        ...(init?.headers || {}),
-      },
-      cache: "no-store",
-    });
+        const res = await fetch(url, {
+            ...init,
+            headers: {
+                "Content-Type": "application/json",
+                ...(init?.headers || {}),
+        ...authHeaders(),
+            },
+            cache: "no-store",
+        });
         let json = null;
         try {
             json = await res.json();
@@ -1060,7 +1116,7 @@ async function walletCredit({ amount, order_id, note }) {
                 isOtpEmpty(data.otp_code) &&
                 !alreadyRefunded(order_id)) {
                 try {
-                    const amt = latestPrice; // ✅ pakai harga terbaru
+                    const amt = latestPrice; // âœ… pakai harga terbaru
                     if (amt > 0) {
                         await walletCredit({
                             amount: amt,
@@ -1154,7 +1210,7 @@ async function walletCredit({ amount, order_id, note }) {
             setOpLoading(false);
         }
     }
-    /* ================= ORDER (fix “gagal” padahal masuk RumahOTP) ================= */
+    /* ================= ORDER (fix â€œgagalâ€ padahal masuk RumahOTP) ================= */
     async function orderWithOperator(country, provider, operator) {
         if (opOrdering)
             return;
@@ -1170,7 +1226,7 @@ async function walletCredit({ amount, order_id, note }) {
         setOpOrdering(true);
         try {
             const r = await roOrder(cid, pid, oid);
-            // ✅ FIX: anggap sukses kalau ada order_id walau success false
+            // âœ… FIX: anggap sukses kalau ada order_id walau success false
             const data = r?.json?.data || null;
             const orderId = String(data?.order_id || "").trim();
             if (!orderId) {
@@ -1194,7 +1250,7 @@ async function walletCredit({ amount, order_id, note }) {
                 app_img: pickedServiceLogo || "",
                 country_flag_url: flagUrlFromCountry(country) || "",
             };
-            // ✅ set order dulu biar UI gak bilang gagal padahal order masuk
+            // âœ… set order dulu biar UI gak bilang gagal padahal order masuk
             setActiveOrder(row);
             saveActiveOrderLS(row);
             activityAdd({
@@ -1208,7 +1264,7 @@ async function walletCredit({ amount, order_id, note }) {
                 expires_in_minute: row.expires_in_minute,
                 ts: Date.now(),
             });
-            // ✅ Debit wallet: kalau gagal, jangan bikin order dianggap gagal (biar gak misleading)
+            // âœ… Debit wallet: kalau gagal, jangan bikin order dianggap gagal (biar gak misleading)
             try {
                 await walletDebit({
                     amount: sellPrice,
@@ -1276,7 +1332,7 @@ async function walletCredit({ amount, order_id, note }) {
         updateNotifStateFromBrowser();
         (async () => {
             setBootLoading(true);
-            // ✅ silent loadBalance biar gak spam toast pas awal
+            // âœ… silent loadBalance biar gak spam toast pas awal
             await Promise.allSettled([refreshPing(), loadServices(), loadBalance({ silent: true })]);
             if (!alive)
                 return;
@@ -1399,8 +1455,8 @@ async function walletCredit({ amount, order_id, note }) {
               Order
             </div>
             <div className="truncate text-[11px] text-[var(--yinn-muted)]">
-              {checking ? "checking..." : online ? "online" : "offline"} •{" "}
-              <MsBadge ms={latencyMs}/> • update {ago}s lalu
+              {checking ? "checking..." : online ? "online" : "offline"} â€¢{" "}
+              <MsBadge ms={latencyMs}/> â€¢ update {ago}s lalu
             </div>
           </div>
 
@@ -1471,13 +1527,13 @@ async function walletCredit({ amount, order_id, note }) {
                     {balanceLoading ? "..." : saldoLabel}
                   </div>
 
-                  {/* ✅ FIX: tampilkan hint error tanpa ubah layout besar */}
+                  {/* âœ… FIX: tampilkan hint error tanpa ubah layout besar */}
                   {balanceErrText ? (<div className="mt-1 truncate text-[10px] font-bold text-red-500">
                       {balanceErrText}
                     </div>) : null}
                 </div>
 
-                {/* ✅ FIX: Top Up redirect /deposit */}
+                {/* âœ… FIX: Top Up redirect /deposit */}
                 <button onClick={() => router.push("/deposit")} className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-extrabold" style={{
             background: "rgba(34,197,94,0.16)",
             border: "1px solid rgba(34,197,94,0.35)",
@@ -1538,13 +1594,13 @@ async function walletCredit({ amount, order_id, note }) {
             const elapsed = nowTick - createdAt;
             const leftCancel = Math.max(0, cooldownMs - elapsed);
             const canCancel = leftCancel <= 0;
-            const phone = String(activeOrder.phone_number || "—");
+            const phone = String(activeOrder.phone_number || "â€”");
             const operator = String(activeOrder.operator || "any");
-            const appName = String(activeOrder.service || "—");
+            const appName = String(activeOrder.service || "â€”");
             const appImg = String(activeOrder.app_img || pickedServiceLogo || "");
             const statusTxt = statusLabel(activeOrder.status);
             const expAt = orderExpiresAt(activeOrder);
-            const expTimeBadge = expAt ? hhmm(expAt) : "—";
+            const expTimeBadge = expAt ? hhmm(expAt) : "â€”";
             const priceBadge = `Rp${formatIDRCompact(activeOrder.price || 0)}`;
             const flagUrl = String(activeOrder.country_flag_url || "").trim() || "";
             return (<div className="mt-3 rounded-2xl border border-[var(--yinn-border)] bg-white/40 p-4 dark:bg-black/10">
@@ -1702,7 +1758,7 @@ async function walletCredit({ amount, order_id, note }) {
             </div>
 
             <div className="mt-3 rounded-2xl border border-[var(--yinn-border)] p-3 text-xs text-[var(--yinn-muted)]">
-              Kalau permission “Denied”, ubah izin notifikasi di setting browser.
+              Kalau permission â€œDeniedâ€, ubah izin notifikasi di setting browser.
             </div>
           </div>
 
@@ -1836,7 +1892,7 @@ async function walletCredit({ amount, order_id, note }) {
 
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-extrabold">
-                    {pickedService?.service_name || "—"}
+                    {pickedService?.service_name || "â€”"}
                   </div>
                   <div className="truncate text-xs text-[var(--yinn-muted)]">
                     Aplikasi yang dipilih
@@ -1898,23 +1954,23 @@ async function walletCredit({ amount, order_id, note }) {
 
                               <div className="min-w-0 flex-1">
                                 <div className="truncate text-sm font-extrabold">
-                                  {c?.name || "—"}
+                                  {c?.name || "â€”"}
                                 </div>
                                 <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-[var(--yinn-muted)]">
                                   <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
                                     {c?.prefix
                             ? `+${String(c.prefix).replace("+", "")}`
-                            : "—"}
+                            : "â€”"}
                                   </span>
                                   <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
-                                    {c?.short ? String(c.short) : "—"}
+                                    {c?.short ? String(c.short) : "â€”"}
                                   </span>
                                   <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
                                     Stok {stock || 0}
                                   </span>
                                   <span className="rounded-full border border-[var(--yinn-border)] px-2 py-0.5">
                                     Mulai{" "}
-                                    {minp ? formatIDR(applyMarkup(minp)) : "—"}
+                                    {minp ? formatIDR(applyMarkup(minp)) : "â€”"}
                                   </span>
                                 </div>
                               </div>
@@ -1958,7 +2014,7 @@ async function walletCredit({ amount, order_id, note }) {
                                                     {serverLabel}
                                                   </span>
                                                   <span className="rounded-full bg-black/5 px-2 py-1 text-[11px] font-bold text-[var(--yinn-muted)] dark:bg-white/5">
-                                                    ID: {pid || "—"}
+                                                    ID: {pid || "â€”"}
                                                   </span>
 
                                                   {typeof p?.rate !== "undefined" &&
@@ -2003,7 +2059,7 @@ async function walletCredit({ amount, order_id, note }) {
                 return;
             setOpenOperator(false);
         }} title="Pilih Operator Seluler" subtitle={opCtx?.country?.name && opCtx?.provider?.provider_id
-            ? `${String(opCtx.country.name)} • Provider ID ${String(opCtx.provider.provider_id)}`
+            ? `${String(opCtx.country.name)} â€¢ Provider ID ${String(opCtx.provider.provider_id)}`
             : "Pilih operator sebelum order"}>
         {opLoading ? (<div className="grid gap-3">
             <div className="rounded-2xl border border-[var(--yinn-border)] p-4">
@@ -2024,7 +2080,7 @@ async function walletCredit({ amount, order_id, note }) {
 
             <div className="mt-3 grid grid-cols-4 gap-3">
               {operators.map((op) => {
-                const name = String(op?.name || "—");
+                const name = String(op?.name || "â€”");
                 const img = String(op?.image || "").trim();
                 const id = String(op?.id || "");
                 return (<button key={id || name} disabled={opOrdering} onClick={() => {
